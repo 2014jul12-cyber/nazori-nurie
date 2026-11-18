@@ -1,0 +1,1426 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#e8f3ff">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="なぞってぬりえ">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>なぞってぬりえ</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&display=swap">
+<style>
+/* Layout: 大きなタブ2つ(なぞる/ぬる) → 横にスクロールするえらぶ行 → 正方形のキャンバス → 色のパレット。指で触る前提で、ボタンはすべて48px以上。 */
+:root {
+  --bg: #e8f3ff;
+  --fg: #1f2d4d;
+  --panel: #ffffff;
+  --line: #bcd3ee;
+  --tab: #d3e6fb;
+  --accent: #d9480f;
+  --accent-fg: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101a30; --fg: #eaf1ff; --panel: #1b2a4a; --line: #35507f;
+    --tab: #223660; --accent: #ff9a5c; --accent-fg: #2a1405;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #101a30; --fg: #eaf1ff; --panel: #1b2a4a; --line: #35507f;
+  --tab: #223660; --accent: #ff9a5c; --accent-fg: #2a1405;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Zen Maru Gothic", "Hiragino Maru Gothic ProN", "Hiragino Sans", "Yu Gothic", sans-serif;
+  font-weight: 500;
+  padding-block: 12px 20px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  -webkit-user-select: none; user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, label:focus-within { outline: 4px solid var(--accent); outline-offset: 3px; }
+.app { max-width: 560px; margin: 0 auto; display: grid; gap: 12px; }
+
+.tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; background: var(--tab); padding: 6px; border-radius: 22px; }
+.tab { min-height: 64px; border: 0; border-radius: 17px; background: transparent; font-weight: 900; font-size: 24px; display: flex; align-items: center; justify-content: center; gap: 10px; }
+.tab svg { width: 30px; height: 30px; flex: none; }
+.tab[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); }
+
+.picker { display: grid; grid-auto-flow: column; grid-auto-columns: 62px; gap: 8px; overflow-x: auto; padding: 3px 3px 8px; margin: -3px -3px 0; scrollbar-width: thin; scroll-snap-type: x proximity; overscroll-behavior-x: contain; touch-action: pan-x; }
+.pick { scroll-snap-align: start; aspect-ratio: 1; min-height: 48px; padding: 5px; border-radius: 16px; border: 3px solid var(--line); background: var(--panel); display: block; min-width: 0; }
+.pick[aria-current="true"] { border-color: var(--accent); outline: 3px solid var(--accent); outline-offset: 0; }
+.pick svg, .pick img { width: 100%; height: 100%; display: block; pointer-events: none; }
+.pick img { object-fit: contain; border-radius: 8px; background: #fff; }
+.pick.add { border-style: dashed; color: var(--accent); display: grid; place-items: center; }
+.pick.add svg { width: 60%; height: 60%; }
+
+.stagewrap { width: min(100%, max(260px, 54vh)); width: min(100%, max(260px, 54dvh)); margin: 0 auto; }
+.stage { position: relative; aspect-ratio: 1; border-radius: 24px; overflow: hidden; border: 4px solid var(--line); background: #fff; touch-action: none; }
+.stage svg.main { display: block; width: 100%; height: 100%; touch-action: none; }
+.cwrap { position: relative; width: 100%; aspect-ratio: 1; }
+.cv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+
+.pic .f { fill: #fff; stroke: #2b2a3a; stroke-width: 5; stroke-linejoin: round; transition: fill .12s; }
+.pic .bg { stroke: none; }
+.pic .o { fill: none; stroke: #2b2a3a; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+.pic .p { fill: #2b2a3a; pointer-events: none; }
+
+.guide { fill: none; stroke: #d3e1f3; stroke-width: 28; stroke-linecap: round; stroke-linejoin: round; }
+.dots { fill: none; stroke: #7f9cc8; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 0.1 11; }
+.stroke { fill: none; stroke-width: 18; stroke-linecap: round; stroke-linejoin: round; }
+
+.palette { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; width: 100%; max-width: 420px; margin: 4px auto 0; }
+.sw, .clear { aspect-ratio: 1; min-height: 48px; border-radius: 50%; min-width: 0; }
+.sw { background: var(--c); border: 3px solid rgba(0, 0, 0, .28); }
+.sw[aria-pressed="true"] { outline: 5px solid var(--fg); outline-offset: 3px; transform: scale(1.04); }
+.clear { background: var(--panel); border: 3px solid var(--line); font-weight: 900; font-size: 15px; line-height: 1.15; padding: 0; display: grid; place-items: center; }
+.clear[data-armed="true"] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+
+.nav { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: min(100%, 420px); margin: 0 auto; }
+.navbtn { min-height: 56px; border-radius: 18px; border: 3px solid var(--line); background: var(--panel); font-weight: 900; font-size: 19px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 8px; }
+.navbtn svg { width: 26px; height: 26px; flex: none; }
+.navbtn[aria-pressed="true"] { background: var(--tab); border-color: var(--accent); }
+.navbtn.go { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; width: 100%; max-width: 420px; margin: 0 auto; }
+.tool { min-height: 56px; border-radius: 16px; border: 3px solid var(--line); background: var(--panel); font-weight: 900; font-size: 17px; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 6px; }
+.tool svg { width: 26px; height: 26px; flex: none; }
+.tool[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+
+.hist { width: min(100%, 420px); margin: 0 auto; display: grid; gap: 6px; }
+.ht { font-weight: 900; font-size: 16px; }
+.hrow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.hslot { display: grid; gap: 4px; justify-items: center; min-width: 0; padding: 6px; border-radius: 16px; border: 3px solid var(--line); background: var(--panel); font-size: 12px; font-weight: 700; min-height: 48px; }
+.hslot .th { width: 100%; aspect-ratio: 1; border-radius: 10px; overflow: hidden; background: #fff; display: grid; place-items: center; }
+.hslot svg, .hslot img { width: 100%; height: 100%; display: block; pointer-events: none; }
+.hslot.empty { border-style: dashed; opacity: .6; }
+.hslot.empty .th { background: transparent; font-size: 14px; }
+.vbody { width: min(64%, 280px); aspect-ratio: 1; border: 3px solid #bcd3ee; border-radius: 16px; overflow: hidden; background: #fff; }
+.vbody svg, .vbody img { width: 100%; height: 100%; display: block; }
+
+.padbar { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 10px; width: 100%; max-width: 420px; margin: 4px auto 0; }
+.padbar button { min-height: 60px; border-radius: 18px; font-size: 20px; font-weight: 900; border: 3px solid var(--line); background: var(--panel); }
+.padbar .go { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-size: 24px; }
+.adult { display: flex; justify-content: center; }
+.link { min-height: 48px; padding: 0 18px; border-radius: 14px; border: 2px dashed var(--line); background: transparent; font-size: 15px; font-weight: 700; }
+.link[data-armed="true"] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+
+.cheer { position: absolute; inset: 0; display: grid; align-content: center; justify-items: center; gap: 12px; background: rgba(255, 255, 255, .94); color: #1f2d4d; overflow: auto; }
+.cheer h2 { margin: 0; font-size: 32px; font-weight: 900; }
+.cheer .msg { margin: 0; padding: 0 24px; text-align: center; font-size: 17px; font-weight: 700; line-height: 1.5; }
+.cheer .star { width: 108px; height: 108px; animation: pop .5s ease-out; }
+.cheer .big { min-height: 64px; min-width: 190px; padding: 0 30px; border: 0; border-radius: 20px; background: #d9480f; color: #fff; font-size: 26px; font-weight: 900; display: grid; place-items: center; cursor: pointer; }
+.cheer .sub { min-height: 52px; padding: 0 22px; border: 3px solid #bcd3ee; border-radius: 16px; background: transparent; color: #1f2d4d; font-size: 20px; font-weight: 700; }
+.cheer i { position: absolute; top: -20px; width: 10px; height: 16px; border-radius: 3px; animation: fall 1.7s var(--d) ease-in forwards; }
+.vh { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+@keyframes pop { 0% { transform: scale(.3); } 70% { transform: scale(1.15); } 100% { transform: scale(1); } }
+@keyframes fall { to { transform: translateY(460px) rotate(420deg); opacity: .2; } }
+@media (prefers-reduced-motion: reduce) {
+  .cheer i { display: none; }
+  .cheer .star { animation: none; }
+  .pic .f { transition: none; }
+}
+html { -webkit-text-size-adjust: 100%; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); color-scheme: light; }
+@media (prefers-color-scheme: dark) { html:not([data-theme="light"]) { color-scheme: dark; } }
+</style>
+
+</head>
+<body>
+<div class="app">
+  <div class="tabs" role="group" aria-label="あそびかた">
+    <button class="tab" id="tabTrace" aria-pressed="true">
+      <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" aria-hidden="true"><path d="M4 22 C10 4 17 30 28 10" stroke-dasharray="0.1 7"/></svg>なぞる
+    </button>
+    <button class="tab" id="tabColor" aria-pressed="false">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3 C22 11 26 15 26 20 A10 10 0 0 1 6 20 C6 15 10 11 16 3Z" fill="currentColor"/></svg>ぬる
+    </button>
+  </div>
+
+  <div class="picker" id="picker"></div>
+
+  <div class="stagewrap">
+    <div class="stage" id="stage">
+      <div id="host"></div>
+      <div class="cheer" id="cheer" hidden>
+        <svg class="star" viewBox="0 0 100 100" aria-hidden="true"><polygon points="50,6 61,38 95,38 67,58 78,92 50,71 22,92 33,58 5,38 39,38" fill="#ffcf33" stroke="#2b2a3a" stroke-width="4" stroke-linejoin="round"/></svg>
+        <h2>できたね！</h2>
+        <button class="big" id="nextBtn">つぎへ</button>
+        <button class="sub" id="againBtn">もういちど</button>
+      </div>
+      <div class="cheer" id="viewer" hidden>
+        <h2 id="vTitle"></h2>
+        <div class="vbody" id="vBody"></div>
+        <button class="sub" id="vClose">とじる</button>
+      </div>
+      <div class="cheer" id="chooser" hidden>
+        <h2>じぶんの え</h2>
+        <p class="msg" id="chMsg">かみに かいた えを しゃしんに とるか、ここで かきます。くろい ペンの えが おすすめ。</p>
+        <label class="big" for="fileIn">しゃしん</label>
+        <input type="file" id="fileIn" accept="image/*" class="vh">
+        <button class="big" id="drawBtn">かく</button>
+        <button class="sub" id="chCancel">やめる</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="nav" id="nav">
+    <button class="navbtn" id="orderBtn" aria-pressed="false" aria-label="えらびかた: じゅんばん">
+      <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" id="orderIcon"><path d="M5 9h22M5 16h22M5 23h22"/></svg><span id="orderTxt">じゅんばん</span>
+    </button>
+    <button class="navbtn go" id="skipBtn">つぎへ<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 16h16M17 8l8 8-8 8"/></svg></button>
+  </div>
+  <div class="hist" id="hist" hidden></div>
+  <div class="tools" id="tools" role="group" aria-label="ぬりかた" hidden>
+    <button class="tool" data-tool="fill" aria-pressed="true"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3 C22 11 26 15 26 20 A10 10 0 0 1 6 20 C6 15 10 11 16 3Z" fill="currentColor"/></svg>ぺたっ</button>
+    <button class="tool" data-tool="fat" aria-pressed="false"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 22 C11 8 20 28 27 10" fill="none" stroke="currentColor" stroke-width="9" stroke-linecap="round"/></svg>ふとい</button>
+    <button class="tool" data-tool="thin" aria-pressed="false"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 22 C11 8 20 28 27 10" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>ほそい</button>
+  </div>
+  <div class="palette" id="palette"></div>
+  <div class="padbar" id="padbar" hidden>
+    <button id="padBack">もどる</button>
+    <button class="go" id="padDone">できた</button>
+    <button id="padClear">けす</button>
+  </div>
+  <div class="adult" id="adult" hidden><button class="link" id="delBtn">この えを けす(おとなの かた)</button></div>
+</div>
+
+<script>
+(function () {
+  var SZ = 480;
+
+  /*PURE_START*/
+  function computeInk(d, S, direct) {
+    var N = S * S, l = new Float32Array(N), i, x, y;
+    for (i = 0; i < N; i++) l[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
+    var ink = new Uint8Array(N);
+    if (direct) {
+      for (i = 0; i < N; i++) ink[i] = Math.max(0, Math.min(255, Math.round(255 - l[i])));
+      return ink;
+    }
+    var W = S + 1, I = new Float64Array(W * W);
+    for (y = 0; y < S; y++) {
+      var row = 0;
+      for (x = 0; x < S; x++) { row += l[y * S + x]; I[(y + 1) * W + x + 1] = I[y * W + x + 1] + row; }
+    }
+    var R = 24;
+    for (y = 0; y < S; y++) {
+      var y0 = Math.max(0, y - R), y1 = Math.min(S, y + R + 1);
+      for (x = 0; x < S; x++) {
+        var x0 = Math.max(0, x - R), x1 = Math.min(S, x + R + 1);
+        var sum = I[y1 * W + x1] - I[y0 * W + x1] - I[y1 * W + x0] + I[y0 * W + x0];
+        var m = sum / ((y1 - y0) * (x1 - x0));
+        var a = (0.9 - (l[y * S + x] + 8) / (m + 8)) / 0.3;
+        ink[y * S + x] = a <= 0 ? 0 : a >= 1 ? 255 : Math.round(a * 255);
+      }
+    }
+    return ink;
+  }
+
+  function dilate(src, S, r) {
+    var N = S * S, tmp = new Uint8Array(N), out = new Uint8Array(N), x, y, k;
+    for (y = 0; y < S; y++) for (x = 0; x < S; x++) {
+      if (!src[y * S + x]) continue;
+      var a = Math.max(0, x - r), b = Math.min(S - 1, x + r);
+      for (k = a; k <= b; k++) tmp[y * S + k] = 1;
+    }
+    for (y = 0; y < S; y++) for (x = 0; x < S; x++) {
+      if (!tmp[y * S + x]) continue;
+      var a2 = Math.max(0, y - r), b2 = Math.min(S - 1, y + r);
+      for (k = a2; k <= b2; k++) out[k * S + x] = 1;
+    }
+    return out;
+  }
+
+  function prepare(ink, S) {
+    var N = S * S, mask = new Uint8Array(N), i, cnt = 0;
+    for (i = 0; i < N; i++) if (ink[i] > 110) { mask[i] = 1; cnt++; }
+    var dil1 = dilate(mask, S, 1), ring = [];
+    for (i = 0; i < N; i++) if (dil1[i] && !mask[i]) ring.push(i);
+    return { ink: ink, mask: mask, dil1: dil1, ring: new Uint32Array(ring), count: cnt, color: new Uint32Array(N).fill(0xFFFFFF), dirty: false, pts: null, band: null };
+  }
+
+  function floodFill(c, S, x, y, rgb) {
+    var N = S * S, bar = c.dil1, idx = y * S + x, dx, dy;
+    if (bar[idx]) {
+      var found = -1, bd = 1e9;
+      for (dy = -10; dy <= 10; dy++) for (dx = -10; dx <= 10; dx++) {
+        var xx = x + dx, yy = y + dy;
+        if (xx < 0 || yy < 0 || xx >= S || yy >= S) continue;
+        var j = yy * S + xx;
+        if (!bar[j]) { var dd = dx * dx + dy * dy; if (dd < bd) { bd = dd; found = j; } }
+      }
+      if (found < 0) return false;
+      idx = found;
+    }
+    if (c.color[idx] === rgb) return false;
+    var vis = new Uint8Array(N), st = new Int32Array(N), sp = 0;
+    st[sp++] = idx; vis[idx] = 1;
+    while (sp) {
+      var p = st[--sp], px = p % S, q;
+      c.color[p] = rgb;
+      if (px > 0) { q = p - 1; if (!vis[q] && !bar[q]) { vis[q] = 1; st[sp++] = q; } }
+      if (px < S - 1) { q = p + 1; if (!vis[q] && !bar[q]) { vis[q] = 1; st[sp++] = q; } }
+      if (p >= S) { q = p - S; if (!vis[q] && !bar[q]) { vis[q] = 1; st[sp++] = q; } }
+      if (p < N - S) { q = p + S; if (!vis[q] && !bar[q]) { vis[q] = 1; st[sp++] = q; } }
+    }
+    for (var k = 0; k < c.ring.length; k++) {
+      var r = c.ring[k], rx = r % S;
+      if ((rx > 0 && vis[r - 1]) || (rx < S - 1 && vis[r + 1]) || (r >= S && vis[r - S]) || (r < N - S && vis[r + S])) c.color[r] = rgb;
+    }
+    return true;
+  }
+  /*PURE_END*/
+
+  var SHAPES = [
+    { name: "よこせん", d: "M40 150 L260 150" },
+    { name: "なみ", d: "M30 150 Q75 60 120 150 T210 150 T270 150" },
+    { name: "ジグザグ", d: "M30 220 L90 80 L150 220 L210 80 L270 220" },
+    { name: "まる", d: "M150 50 A100 100 0 1 1 150 250 A100 100 0 1 1 150 50" },
+    { name: "さんかく", d: "M150 40 L260 250 L40 250 Z" },
+    { name: "しかく", d: "M60 60 L240 60 L240 240 L60 240 Z" },
+    { name: "ハート", d: "M150 245 C60 180 40 120 70 80 C95 50 135 60 150 95 C165 60 205 50 230 80 C260 120 240 180 150 245Z",
+      deco: '<circle class="p" cx="118" cy="125" r="8"/><circle class="p" cx="182" cy="125" r="8"/><path class="o" d="M135 160 Q150 176 165 160"/>' },
+    { name: "ほし", d: "M150 35 L179 110 L260 115 L197 165 L220 245 L150 200 L80 245 L103 165 L40 115 L121 110Z",
+      deco: '<circle class="p" cx="132" cy="140" r="7"/><circle class="p" cx="168" cy="140" r="7"/><path class="o" d="M138 165 Q150 178 162 165"/>' },
+    { name: "ひよこ", d: "M150 55 C215 55 255 115 250 175 C245 230 205 255 150 255 C95 255 55 230 50 175 C45 115 85 55 150 55Z",
+      deco: '<path class="o" d="M150 55 Q138 30 125 36 M150 55 Q150 26 150 20 M150 55 Q162 30 175 36"/><circle class="p" cx="115" cy="140" r="9"/><circle class="p" cx="185" cy="140" r="9"/><circle class="f" style="fill:#f9b4c6" cx="92" cy="176" r="13"/><circle class="f" style="fill:#f9b4c6" cx="208" cy="176" r="13"/><path class="f" style="fill:#f5922f" d="M133 160 L167 160 L150 184Z"/>' },
+    { name: "ねこ", d: "M70 210 C40 170 45 120 60 90 L55 40 L105 70 C130 62 170 62 195 70 L245 40 L240 90 C255 120 260 170 230 210 C200 250 100 250 70 210Z",
+      deco: '<circle class="p" cx="115" cy="140" r="9"/><circle class="p" cx="185" cy="140" r="9"/><path class="p" d="M141 165 L159 165 L150 177Z"/><path class="o" d="M150 177 L150 187 M150 187 Q137 200 124 190 M150 187 Q163 200 176 190"/><path class="o" d="M68 168 L102 174 M70 192 L102 188 M232 168 L198 174 M230 192 L198 188"/>' },
+    { name: "うさぎ", d: "M150 250 C90 250 70 200 80 160 C85 130 100 120 105 100 C85 80 75 30 95 15 C115 5 130 50 135 85 C142 84 158 84 165 85 C170 50 185 5 205 15 C225 30 215 80 195 100 C200 120 215 130 220 160 C230 200 210 250 150 250Z",
+      deco: '<circle class="p" cx="120" cy="170" r="8"/><circle class="p" cx="180" cy="170" r="8"/><ellipse class="p" cx="150" cy="190" rx="9" ry="6"/><path class="o" d="M150 196 L150 206 Q142 216 132 210 M150 206 Q158 216 168 210"/>' },
+    { name: "くま", d: "M67.1 118.4 A95 95 0 1 0 232.9 118.4 A34 34 0 1 0 185.9 77 A95 95 0 0 0 114.1 77 A34 34 0 1 0 67.1 118.4Z",
+      deco: '<circle class="p" cx="118" cy="150" r="8"/><circle class="p" cx="182" cy="150" r="8"/><ellipse class="o" cx="150" cy="195" rx="40" ry="32"/><ellipse class="p" cx="150" cy="180" rx="13" ry="9"/><path class="o" d="M150 189 L150 201 M137 209 Q150 219 150 201 Q150 219 163 209"/>' },
+    { name: "おうかん", d: "M50 225 L40 90 L100 150 L150 70 L200 150 L260 90 L250 225Z",
+      deco: '<path class="o" d="M48 190 L252 190"/><circle class="f" style="fill:#e5484d" cx="100" cy="212" r="10"/><circle class="f" style="fill:#4fb3e8" cx="150" cy="212" r="10"/><circle class="f" style="fill:#46b36b" cx="200" cy="212" r="10"/>' },
+    { name: "おしろ", d: "M50 260 L50 130 L80 60 L110 130 L110 160 L130 160 L130 110 L150 50 L170 110 L170 160 L190 160 L190 130 L220 60 L250 130 L250 260Z",
+      deco: '<path class="o" d="M135 260 L135 218 Q150 196 165 218 L165 260"/><circle class="o" cx="80" cy="185" r="9"/><circle class="o" cx="220" cy="185" r="9"/><circle class="o" cx="150" cy="140" r="9"/>' }
+  ];
+
+  var PICS = [
+    { id: "rabbit", name: "うさぎ", svg:
+      '<rect class="f bg" x="0" y="0" width="300" height="300"/>' +
+      '<ellipse class="f" cx="105" cy="72" rx="26" ry="64"/><ellipse class="f" cx="195" cy="72" rx="26" ry="64"/>' +
+      '<ellipse class="f" cx="105" cy="80" rx="12" ry="44"/><ellipse class="f" cx="195" cy="80" rx="12" ry="44"/>' +
+      '<ellipse class="f" cx="150" cy="190" rx="90" ry="78"/>' +
+      '<circle class="f" cx="92" cy="212" r="15"/><circle class="f" cx="208" cy="212" r="15"/>' +
+      '<circle class="p" cx="118" cy="178" r="8"/><circle class="p" cx="182" cy="178" r="8"/>' +
+      '<ellipse class="p" cx="150" cy="200" rx="10" ry="7"/>' +
+      '<path class="o" d="M150 207 L150 219 Q141 231 129 224 M150 219 Q159 231 171 224"/>' },
+    { id: "cat", name: "ねこ", svg:
+      '<rect class="f bg" x="0" y="0" width="300" height="300"/>' +
+      '<path class="f" d="M68 125 L58 42 L132 88Z"/><path class="f" d="M232 125 L242 42 L168 88Z"/>' +
+      '<ellipse class="f" cx="150" cy="170" rx="98" ry="82"/>' +
+      '<circle class="p" cx="113" cy="158" r="9"/><circle class="p" cx="187" cy="158" r="9"/>' +
+      '<path class="p" d="M141 182 L159 182 L150 193Z"/>' +
+      '<path class="o" d="M150 193 L150 204 M150 204 Q137 217 124 207 M150 204 Q163 217 176 207"/>' +
+      '<path class="o" d="M64 180 L102 186 M66 205 L102 198 M236 180 L198 186 M234 205 L198 198"/>' +
+      '<path class="o" d="M150 96 L150 116 M128 100 L133 118 M172 100 L167 118"/>' },
+    { id: "bear", name: "くま", svg:
+      '<rect class="f bg" x="0" y="0" width="300" height="300"/>' +
+      '<circle class="f" cx="82" cy="88" r="34"/><circle class="f" cx="218" cy="88" r="34"/>' +
+      '<circle class="f" cx="82" cy="88" r="16"/><circle class="f" cx="218" cy="88" r="16"/>' +
+      '<circle class="f" cx="150" cy="165" r="95"/>' +
+      '<ellipse class="f" cx="150" cy="198" rx="40" ry="32"/>' +
+      '<circle class="p" cx="118" cy="150" r="8"/><circle class="p" cx="182" cy="150" r="8"/>' +
+      '<ellipse class="p" cx="150" cy="183" rx="13" ry="9"/>' +
+      '<path class="o" d="M150 192 L150 204 M136 212 Q150 222 150 204 Q150 222 164 212"/>' },
+    { id: "dog", name: "いぬ", svg:
+      '<rect class="f bg" x="0" y="0" width="300" height="300"/>' +
+      '<ellipse class="f" cx="62" cy="145" rx="30" ry="62" transform="rotate(16 62 145)"/>' +
+      '<ellipse class="f" cx="238" cy="145" rx="30" ry="62" transform="rotate(-16 238 145)"/>' +
+      '<ellipse class="f" cx="150" cy="150" rx="88" ry="82"/>' +
+      '<ellipse class="f" cx="112" cy="122" rx="28" ry="26"/>' +
+      '<ellipse class="f" cx="150" cy="198" rx="52" ry="40"/>' +
+      '<circle class="p" cx="112" cy="122" r="9"/><circle class="p" cx="188" cy="122" r="9"/>' +
+      '<ellipse class="p" cx="150" cy="178" rx="17" ry="12"/>' +
+      '<path class="f" d="M140 220 Q150 252 160 220Z"/>' +
+      '<path class="o" d="M150 190 L150 206 M128 212 Q150 228 150 206 Q150 228 172 212"/>' },
+    { id: "chick", name: "ひよこ", svg:
+      '<rect class="f bg" x="0" y="0" width="300" height="300"/>' +
+      '<path class="f" d="M105 258 L145 258 L125 288Z"/><path class="f" d="M155 258 L195 258 L175 288Z"/>' +
+      '<circle class="f" cx="150" cy="165" r="95"/>' +
+      '<path class="f" d="M58 160 C30 185 42 232 90 222 C92 195 80 172 58 160Z"/>' +
+      '<path class="f" d="M242 160 C270 185 258 232 210 222 C208 195 220 172 242 160Z"/>' +
+      '<circle class="f" cx="100" cy="188" r="13"/><circle class="f" cx="200" cy="188" r="13"/>' +
+      '<path class="o" d="M150 72 Q138 46 124 54 M150 72 Q150 42 150 36 M150 72 Q162 46 176 54"/>' +
+      '<circle class="p" cx="118" cy="150" r="8"/><circle class="p" cx="182" cy="150" r="8"/>' +
+      '<path class="f" d="M133 166 L167 166 L150 190Z"/>' },
+    { id: "elephant", name: "ぞう", svg:
+      '<rect class="f bg" x="0" y="0" width="300" height="300"/>' +
+      '<circle class="f" cx="62" cy="135" r="54"/><circle class="f" cx="238" cy="135" r="54"/>' +
+      '<circle class="f" cx="62" cy="135" r="30"/><circle class="f" cx="238" cy="135" r="30"/>' +
+      '<circle class="f" cx="150" cy="135" r="82"/>' +
+      '<path class="f" d="M112 212 Q92 242 110 260 Q122 240 126 216Z"/><path class="f" d="M188 212 Q208 242 190 260 Q178 240 174 216Z"/>' +
+      '<rect class="f" x="126" y="150" width="48" height="118" rx="24"/>' +
+      '<path class="o" d="M134 195 L166 195 M134 220 L166 220 M134 245 L166 245"/>' +
+      '<circle class="p" cx="118" cy="118" r="8"/><circle class="p" cx="182" cy="118" r="8"/>' },
+    { id: "penguin", name: "ペンギン", svg:
+      '<rect class="f bg" x="0" y="0" width="300" height="300"/>' +
+      '<ellipse class="f" cx="118" cy="280" rx="26" ry="11"/><ellipse class="f" cx="182" cy="280" rx="26" ry="11"/>' +
+      '<ellipse class="f" cx="150" cy="168" rx="86" ry="106"/>' +
+      '<ellipse class="f" cx="150" cy="192" rx="58" ry="80"/>' +
+      '<ellipse class="f" cx="60" cy="185" rx="18" ry="52" transform="rotate(14 60 185)"/>' +
+      '<ellipse class="f" cx="240" cy="185" rx="18" ry="52" transform="rotate(-14 240 185)"/>' +
+      '<circle class="f" cx="122" cy="118" r="16"/><circle class="f" cx="178" cy="118" r="16"/>' +
+      '<circle class="p" cx="124" cy="120" r="7"/><circle class="p" cx="176" cy="120" r="7"/>' +
+      '<path class="f" d="M134 142 L166 142 L150 166Z"/>' },
+    { id: "princess", name: "おひめさま", svg:
+      '<rect class="f bg" x="0" y="0" width="300" height="300"/>' +
+      '<ellipse class="f" cx="150" cy="122" rx="60" ry="74"/>' +
+      '<path class="f" d="M130 205 L170 205 C205 232 240 262 262 290 L38 290 C60 262 95 232 130 205Z"/>' +
+      '<path class="f" d="M124 158 L176 158 L170 205 L130 205Z"/>' +
+      '<circle class="f" cx="112" cy="172" r="15"/><circle class="f" cx="188" cy="172" r="15"/>' +
+      '<circle class="f" cx="150" cy="118" r="40"/>' +
+      '<circle class="f" cx="124" cy="136" r="8"/><circle class="f" cx="176" cy="136" r="8"/>' +
+      '<circle class="p" cx="136" cy="122" r="5"/><circle class="p" cx="164" cy="122" r="5"/>' +
+      '<path class="o" d="M142 140 Q150 148 158 140"/>' +
+      '<path class="f" d="M110 112 C118 74 182 74 190 112 C170 98 130 98 110 112Z"/>' +
+      '<path class="f" d="M118 78 L126 52 L139 68 L150 44 L161 68 L174 52 L182 78Z"/>' +
+      '<path class="f" d="M150 205 L126 190 L126 220Z"/><path class="f" d="M150 205 L174 190 L174 220Z"/><circle class="f" cx="150" cy="205" r="7"/>' },
+    { id: "castle", name: "おしろ", svg:
+      '<rect class="f bg" x="0" y="0" width="300" height="300"/>' +
+      '<rect class="f" x="0" y="268" width="300" height="32"/>' +
+      '<rect class="f" x="55" y="132" width="60" height="136"/><path class="f" d="M45 136 L85 64 L125 136Z"/>' +
+      '<rect class="f" x="185" y="132" width="60" height="136"/><path class="f" d="M175 136 L215 64 L255 136Z"/>' +
+      '<rect class="f" x="115" y="118" width="70" height="150"/><path class="f" d="M105 122 L150 42 L195 122Z"/>' +
+      '<path class="f" d="M132 268 L132 224 Q150 198 168 224 L168 268Z"/>' +
+      '<circle class="f" cx="85" cy="178" r="11"/><circle class="f" cx="215" cy="178" r="11"/><circle class="f" cx="150" cy="160" r="11"/>' +
+      '<path class="o" d="M85 64 L85 38 M215 64 L215 38 M150 42 L150 16"/>' +
+      '<path class="f" d="M85 38 L110 46 L85 54Z"/><path class="f" d="M215 38 L240 46 L215 54Z"/><path class="f" d="M150 16 L175 24 L150 32Z"/>' },
+    { id: "crown", name: "おうかん", svg:
+      '<rect class="f bg" x="0" y="0" width="300" height="300"/>' +
+      '<path class="f" d="M52 215 L40 100 L100 160 L150 80 L200 160 L260 100 L248 215Z"/>' +
+      '<rect class="f" x="46" y="205" width="208" height="42" rx="10"/>' +
+      '<circle class="f" cx="40" cy="92" r="12"/><circle class="f" cx="150" cy="70" r="12"/><circle class="f" cx="260" cy="92" r="12"/>' +
+      '<circle class="f" cx="100" cy="226" r="9"/><circle class="f" cx="150" cy="226" r="9"/><circle class="f" cx="200" cy="226" r="9"/>' },
+    { id: "apple", name: "りんご", svg:
+      '<rect class="f bg" x="0" y="0" width="300" height="300"/>' +
+      '<path class="f" d="M155 85 C165 45 200 35 220 45 C215 75 185 95 155 85Z"/>' +
+      '<path class="f" d="M150 90 C110 60 50 85 55 155 C60 225 110 270 150 252 C190 270 240 225 245 155 C250 85 190 60 150 90Z"/>' +
+      '<path class="o" d="M150 90 C150 72 146 56 139 42"/>' },
+    { id: "fish", name: "さかな", svg:
+      '<rect class="f bg" x="0" y="0" width="300" height="300"/>' +
+      '<circle class="f" cx="50" cy="75" r="14"/><circle class="f" cx="82" cy="48" r="9"/>' +
+      '<path class="f" d="M130 105 C140 70 175 70 185 108Z"/>' +
+      '<path class="f" d="M225 150 L275 105 L275 195Z"/>' +
+      '<path class="f" d="M60 150 C100 80 190 80 228 150 C190 220 100 220 60 150Z"/>' +
+      '<circle class="f" cx="105" cy="135" r="12"/><circle class="p" cx="105" cy="135" r="5"/>' },
+    { id: "flower", name: "おはな", svg:
+      '<rect class="f bg" x="0" y="0" width="300" height="300"/>' +
+      '<rect class="f" x="142" y="180" width="16" height="110"/>' +
+      '<path class="f" d="M158 245 C190 215 225 225 238 240 C218 266 182 266 158 245Z"/>' +
+      '<circle class="f" cx="150" cy="85" r="38"/><circle class="f" cx="202" cy="123" r="38"/>' +
+      '<circle class="f" cx="182" cy="183" r="38"/><circle class="f" cx="118" cy="183" r="38"/>' +
+      '<circle class="f" cx="98" cy="123" r="38"/><circle class="f" cx="150" cy="140" r="30"/>' },
+    { id: "house", name: "おうち", svg:
+      '<rect class="f bg" x="0" y="0" width="300" height="300"/>' +
+      '<circle class="f" cx="48" cy="52" r="24"/>' +
+      '<rect class="f" x="195" y="82" width="26" height="55"/>' +
+      '<rect class="f" x="70" y="140" width="160" height="125"/>' +
+      '<path class="f" d="M48 146 L150 62 L252 146Z"/>' +
+      '<rect class="f" x="132" y="198" width="36" height="67"/>' +
+      '<rect class="f" x="86" y="166" width="34" height="34"/><rect class="f" x="180" y="166" width="34" height="34"/>' },
+    { id: "car", name: "くるま", svg:
+      '<rect class="f bg" x="0" y="0" width="300" height="300"/>' +
+      '<path class="f" d="M80 150 L108 104 L196 104 L228 150Z"/>' +
+      '<path class="f" d="M98 146 L118 114 L146 114 L146 146Z"/><path class="f" d="M156 146 L156 114 L190 114 L210 146Z"/>' +
+      '<rect class="f" x="38" y="148" width="224" height="56" rx="14"/>' +
+      '<circle class="f" cx="92" cy="208" r="28"/><circle class="f" cx="208" cy="208" r="28"/>' +
+      '<circle class="f" cx="92" cy="208" r="10"/><circle class="f" cx="208" cy="208" r="10"/>' }
+  ];
+
+  /* ---------- もんだいを ふやす(ぬりえ・なぞりえ) ---------- */
+  var BGR = '<rect class="f bg" x="0" y="0" width="300" height="300"/>';
+  var PN = "#f9b4c6";
+  var DK = "#3a3a4a";
+  function n1(v) { return Math.round(v * 10) / 10; }
+  function sty(s) { return s ? ' style="fill:' + s + '"' : ""; }
+  function fP(d, s) { return '<path class="f"' + sty(s) + ' d="' + d + '"/>'; }
+  function fC(x, y, r, s) { return '<circle class="f"' + sty(s) + ' cx="' + x + '" cy="' + y + '" r="' + r + '"/>'; }
+  function fE(x, y, rx, ry, rot, s) {
+    return '<ellipse class="f"' + sty(s) + ' cx="' + x + '" cy="' + y + '" rx="' + rx + '" ry="' + ry + '"' +
+      (rot ? ' transform="rotate(' + rot + " " + x + " " + y + ')"' : "") + "/>";
+  }
+  function fR(x, y, w, h, r, s) { return '<rect class="f"' + sty(s) + ' x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (r || 0) + '"/>'; }
+  function dot(x, y, r) { return '<circle class="p" cx="' + x + '" cy="' + y + '" r="' + r + '"/>'; }
+  function dotE(x, y, rx, ry) { return '<ellipse class="p" cx="' + x + '" cy="' + y + '" rx="' + rx + '" ry="' + ry + '"/>'; }
+  function ln(d) { return '<path class="o" d="' + d + '"/>'; }
+  function oC(x, y, r) { return '<circle class="o" cx="' + x + '" cy="' + y + '" r="' + r + '"/>'; }
+  function pP(d) { return '<path class="p" d="' + d + '"/>'; }
+  function ring(n, cx, cy, R, fn) {
+    var s = "", i, a;
+    for (i = 0; i < n; i++) { a = 2 * Math.PI * i / n - Math.PI / 2; s += fn(n1(cx + R * Math.cos(a)), n1(cy + R * Math.sin(a)), a, i); }
+    return s;
+  }
+  function starD(cx, cy, R, r) {
+    var d = "", i, a, k;
+    for (i = 0; i < 10; i++) { a = -Math.PI / 2 + i * Math.PI / 5; k = i % 2 ? r : R; d += (i ? " L" : "M") + n1(cx + k * Math.cos(a)) + " " + n1(cy + k * Math.sin(a)); }
+    return d + "Z";
+  }
+  function face(cx, cy, g) {
+    return dot(cx - g, cy, 7) + dot(cx + g, cy, 7) + ln("M" + (cx - 14) + " " + (cy + 22) + " Q" + cx + " " + (cy + 40) + " " + (cx + 14) + " " + (cy + 22));
+  }
+  function band(R) {
+    return fP("M" + (150 - R) + " 235 A" + R + " " + R + " 0 0 1 " + (150 + R) + " 235 L" + (150 + R - 20) + " 235 A" + (R - 20) + " " + (R - 20) + " 0 0 0 " + (170 - R) + " 235Z");
+  }
+  var spiralD = (function () {
+    var xs = [150, 170, 130, 190, 110, 210, 90, 230, 70], d = "M150 150", i, r;
+    for (i = 1; i < xs.length; i++) { r = Math.abs(xs[i] - xs[i - 1]) / 2; d += " A" + r + " " + r + " 0 0 1 " + xs[i] + " 150"; }
+    return d;
+  })();
+
+  PICS.push.apply(PICS, [
+    { id: "sun", name: "たいよう", svg: BGR +
+      ring(12, 150, 150, 126, function (x, y, a) {
+        var bx = 150 + 78 * Math.cos(a), by = 150 + 78 * Math.sin(a), px = -Math.sin(a) * 17, py = Math.cos(a) * 17;
+        return fP("M" + n1(bx + px) + " " + n1(by + py) + " L" + x + " " + y + " L" + n1(bx - px) + " " + n1(by - py) + "Z");
+      }) + fC(150, 150, 70) + dot(126, 140, 8) + dot(174, 140, 8) + ln("M122 166 Q150 194 178 166") + fC(104, 166, 10, PN) + fC(196, 166, 10, PN) },
+    { id: "rainbow", name: "にじ", svg: BGR + band(130) + band(110) + band(90) + band(70) +
+      fC(40, 242, 26) + fC(74, 234, 32) + fC(108, 246, 24) + fC(260, 242, 26) + fC(226, 234, 32) + fC(192, 246, 24) },
+    { id: "butterfly", name: "ちょうちょ", svg: BGR +
+      fE(100, 108, 55, 40, -28) + fE(200, 108, 55, 40, 28) + fE(108, 188, 38, 32, 25) + fE(192, 188, 38, 32, -25) +
+      fC(98, 104, 15) + fC(202, 104, 15) + fC(112, 190, 12) + fC(188, 190, 12) +
+      fE(150, 155, 10, 58) + fC(150, 92, 14) + ln("M145 82 Q132 56 118 52 M155 82 Q168 56 182 52") + dot(145, 90, 3) + dot(155, 90, 3) },
+    { id: "ladybug", name: "てんとうむし", svg: BGR +
+      ln("M140 62 Q125 40 112 38 M160 62 Q175 40 188 38") + fC(150, 92, 36) + fC(150, 178, 88) + ln("M150 92 L150 266") +
+      fC(104, 152, 17) + fC(196, 152, 17) + fC(100, 208, 15) + fC(200, 208, 15) + dot(138, 88, 5) + dot(162, 88, 5) },
+    { id: "turtle", name: "かめ", svg: BGR +
+      fP("M62 192 L28 208 L64 172Z") + fR(100, 185, 34, 48, 14) + fR(190, 185, 34, 48, 14) + fE(258, 168, 30, 25) +
+      fR(52, 188, 196, 28, 12) + fP("M52 195 C52 90 248 90 248 195Z") +
+      ln("M95 132 L125 108 M175 108 L205 132 M150 98 L150 192 M105 192 L120 152 M195 192 L180 152") + dot(268, 162, 5) + ln("M262 178 Q272 182 280 176") },
+    { id: "lion", name: "らいおん", svg: BGR +
+      ring(12, 150, 155, 82, function (x, y) { return fC(x, y, 32); }) + fC(86, 92, 20) + fC(214, 92, 20) + fC(150, 158, 66) +
+      fE(150, 186, 34, 25) + dot(128, 146, 8) + dot(172, 146, 8) + pP("M138 168 L162 168 L150 181Z") +
+      ln("M150 181 L150 190 M150 190 Q138 202 126 194 M150 190 Q162 202 174 194") },
+    { id: "pig", name: "ぶた", svg: BGR +
+      fP("M82 92 L104 44 L140 82Z") + fP("M218 92 L196 44 L160 82Z") + fE(150, 165, 98, 88) + fE(150, 190, 38, 28, 0, PN) +
+      dot(138, 190, 5) + dot(162, 190, 5) + dot(110, 145, 9) + dot(190, 145, 9) },
+    { id: "panda", name: "ぱんだ", svg: BGR +
+      fC(86, 80, 30, DK) + fC(214, 80, 30, DK) + fE(150, 160, 100, 88) + fE(110, 150, 22, 30, 25, DK) + fE(190, 150, 22, 30, -25, DK) +
+      fC(112, 148, 8, "#fff") + fC(188, 148, 8, "#fff") + dot(113, 149, 4) + dot(187, 149, 4) + fE(150, 186, 14, 10, 0, DK) +
+      ln("M150 196 L150 203 M150 203 Q138 215 126 207 M150 203 Q162 215 174 207") },
+    { id: "sheep", name: "ひつじ", svg: BGR +
+      fR(108, 225, 18, 48, 6) + fR(174, 225, 18, 48, 6) +
+      fC(80, 150, 36) + fC(100, 105, 36) + fC(150, 88, 38) + fC(200, 105, 36) + fC(220, 150, 36) + fC(100, 200, 36) + fC(150, 215, 38) + fC(200, 200, 36) + fC(150, 150, 56) +
+      fE(100, 152, 22, 11, 20) + fE(200, 152, 22, 11, -20) + fE(150, 160, 44, 54) +
+      dot(135, 150, 6) + dot(165, 150, 6) + dotE(150, 176, 8, 5) + ln("M143 190 Q150 197 157 190") },
+    { id: "frog", name: "かえる", svg: BGR +
+      fE(150, 195, 100, 72) + fC(98, 110, 34) + fC(202, 110, 34) + fC(98, 110, 17) + fC(202, 110, 17) + dot(98, 110, 8) + dot(202, 110, 8) +
+      dot(138, 170, 4) + dot(162, 170, 4) + ln("M80 205 Q150 262 220 205") + fC(92, 200, 10, PN) + fC(208, 200, 10, PN) },
+    { id: "octopus", name: "たこ", svg: BGR +
+      fE(62, 212, 18, 46, 18) + fE(100, 238, 17, 42, 6) + fE(150, 246, 17, 40) + fE(200, 238, 17, 42, -6) + fE(238, 212, 18, 46, -18) +
+      fE(150, 120, 92, 82) + fC(112, 125, 20) + fC(188, 125, 20) + dot(114, 128, 9) + dot(186, 128, 9) +
+      ln("M125 166 Q150 192 175 166") + fC(90, 158, 9, PN) + fC(210, 158, 9, PN) },
+    { id: "whale", name: "くじら", svg: BGR +
+      fP("M210 150 C232 128 240 96 268 86 C276 108 266 134 252 150 C268 160 278 186 284 208 C258 208 236 192 212 176Z") +
+      fE(125, 160, 102, 72) + fE(125, 192, 80, 30) + dot(70, 150, 6) + ln("M58 172 Q74 184 92 178") +
+      ln("M125 88 Q125 70 108 58 M125 88 Q125 70 142 58") + fC(104, 52, 7) + fC(146, 52, 7) },
+    { id: "rocket", name: "ろけっと", svg: BGR +
+      fP("M120 215 L150 272 L180 215Z") + fP("M108 150 L66 235 L108 218Z") + fP("M192 150 L234 235 L192 218Z") +
+      fP("M150 28 C198 70 206 140 196 218 L104 218 C94 140 102 70 150 28Z") + fC(150, 118, 26) + fC(150, 118, 14) + ln("M100 190 L200 190") },
+    { id: "airplane", name: "ひこうき", svg: BGR +
+      fP("M40 150 L16 100 L72 140Z") + fE(150, 160, 118, 30) + fP("M130 172 L186 252 L214 252 L180 170Z") +
+      fC(112, 157, 8) + fC(140, 157, 8) + fC(168, 157, 8) + fC(196, 157, 8) + fP("M226 146 Q248 146 256 160 L226 160Z") },
+    { id: "ship", name: "ふね", svg: BGR +
+      fC(150, 56, 12) + fC(168, 36, 9) + fR(136, 100, 28, 44, 4) + fR(105, 142, 90, 50, 6) + fC(125, 166, 9) + fC(150, 166, 9) + fC(175, 166, 9) +
+      fP("M38 190 L262 190 L228 252 L72 252Z") + ln("M10 270 Q30 256 50 270 T90 270 T130 270 T170 270 T210 270 T250 270 T290 270") },
+    { id: "train", name: "でんしゃ", svg: BGR +
+      ln("M10 264 L290 264") + fR(28, 90, 244, 122, 20) + fR(48, 112, 44, 40, 6) + fR(108, 112, 44, 40, 6) + fR(168, 112, 44, 40, 6) + fR(226, 112, 30, 40, 6) +
+      ln("M28 176 L272 176") + fC(75, 222, 22) + fC(150, 222, 22) + fC(225, 222, 22) + dot(75, 222, 6) + dot(150, 222, 6) + dot(225, 222, 6) + fC(264, 188, 7) },
+    { id: "bus", name: "ばす", svg: BGR +
+      fR(25, 85, 250, 125, 22) + fR(42, 105, 46, 40, 6) + fR(98, 105, 46, 40, 6) + fR(154, 105, 46, 40, 6) + fR(212, 105, 46, 64, 6) +
+      ln("M25 172 L275 172") + fC(80, 215, 28) + fC(80, 215, 11) + fC(220, 215, 28) + fC(220, 215, 11) + fC(266, 192, 7) },
+    { id: "cake", name: "けーき", svg: BGR +
+      fE(150, 258, 125, 14) + fR(50, 170, 200, 82, 14) + fR(80, 118, 140, 54, 14) + ln("M50 192 Q70 215 90 192 T130 192 T170 192 T210 192 T250 192") +
+      fR(112, 76, 12, 44, 3) + fR(144, 76, 12, 44, 3) + fR(176, 76, 12, 44, 3) +
+      fP("M118 58 Q106 72 118 80 Q130 72 118 58Z") + fP("M150 58 Q138 72 150 80 Q162 72 150 58Z") + fP("M182 58 Q170 72 182 80 Q194 72 182 58Z") +
+      fC(100, 118, 9) + fC(200, 118, 9) },
+    { id: "icecream", name: "あいす", svg: BGR +
+      fP("M92 165 L208 165 L150 280Z") + ln("M106 190 L170 264 M194 190 L130 264") +
+      fE(150, 150, 58, 38) + fC(150, 100, 42) + fC(150, 52, 12) + ln("M150 40 Q155 22 172 16") },
+    { id: "strawberry", name: "いちご", svg: BGR +
+      fP("M68 104 C88 72 212 72 232 104 C238 175 192 250 150 270 C108 250 62 175 68 104Z") +
+      fP("M150 92 L116 58 L140 84 L150 44 L160 84 L184 58Z") +
+      dotE(110, 132, 4, 6) + dotE(150, 128, 4, 6) + dotE(190, 132, 4, 6) + dotE(126, 172, 4, 6) + dotE(174, 172, 4, 6) + dotE(150, 212, 4, 6) + dotE(100, 168, 4, 6) + dotE(200, 168, 4, 6) },
+    { id: "grapes", name: "ぶどう", svg: BGR +
+      ln("M150 80 L150 52 Q152 38 170 34") + fP("M160 70 C190 40 225 48 232 60 C220 82 185 86 160 70Z") +
+      fC(84, 104, 23) + fC(128, 104, 23) + fC(172, 104, 23) + fC(216, 104, 23) +
+      fC(106, 146, 23) + fC(150, 146, 23) + fC(194, 146, 23) + fC(128, 188, 23) + fC(172, 188, 23) + fC(150, 230, 23) },
+    { id: "watermelon", name: "すいか", svg: BGR +
+      fP("M26 118 A124 124 0 0 0 274 118Z") + fP("M44 118 A106 106 0 0 0 256 118Z") +
+      dotE(108, 152, 5, 8) + dotE(150, 178, 5, 8) + dotE(192, 152, 5, 8) + dotE(126, 204, 5, 8) + dotE(174, 204, 5, 8) },
+    { id: "carrot", name: "にんじん", svg: BGR +
+      fP("M150 92 C130 62 110 50 100 30 C130 36 150 55 150 92Z") + fP("M150 92 C150 60 150 44 150 26 C162 48 160 70 150 92Z") + fP("M150 92 C170 62 190 50 200 30 C170 36 150 55 150 92Z") +
+      fP("M104 96 Q150 72 196 96 L150 278Z") + ln("M122 132 L144 132 M158 164 L180 164 M138 204 L158 204") },
+    { id: "mushroom", name: "きのこ", svg: BGR +
+      fP("M112 168 L188 168 L194 248 Q150 266 106 248Z") + fP("M38 172 C38 62 262 62 262 172Z") +
+      fC(95, 132, 14) + fC(160, 108, 17) + fC(214, 142, 13) + dot(135, 205, 5) + dot(165, 205, 5) + ln("M138 224 Q150 234 162 224") },
+    { id: "ghost", name: "おばけ", svg: BGR +
+      fP("M68 258 L68 122 A82 82 0 0 1 232 122 L232 258 L205 236 L178 258 L150 236 L122 258 L95 236Z") +
+      dotE(122, 130, 10, 15) + dotE(178, 130, 10, 15) + fE(150, 176, 14, 18, 0, "#fff") + fC(98, 164, 10, PN) + fC(202, 164, 10, PN) },
+    { id: "snowman", name: "ゆきだるま", svg: BGR +
+      ln("M96 172 L40 136 M60 150 L44 152 M204 172 L260 136") + fC(150, 218, 62) + fC(150, 118, 44) +
+      fR(108, 152, 84, 16, 7) + fR(98, 78, 104, 12, 4) + fR(120, 34, 60, 48, 4) + fP("M150 120 L192 128 L150 134Z") +
+      dot(136, 108, 5) + dot(164, 108, 5) + dot(150, 192, 5) + dot(150, 216, 5) + dot(150, 240, 5) },
+    { id: "tree", name: "くりすますつりー", svg: BGR +
+      fR(132, 228, 36, 44, 4) + fP("M150 128 L58 238 L242 238Z") + fP("M150 84 L80 176 L220 176Z") + fP("M150 46 L102 120 L198 120Z") +
+      fP(starD(150, 30, 20, 9)) + fC(118, 214, 8) + fC(184, 220, 8) + fC(150, 168, 8) + fC(120, 152, 7) + fC(150, 98, 7) },
+    { id: "robot", name: "ろぼっと", svg: BGR +
+      ln("M150 70 L150 44") + fC(150, 38, 9) + fR(62, 100, 22, 40, 6) + fR(216, 100, 22, 40, 6) + fR(82, 70, 136, 108, 18) +
+      fC(120, 118, 18) + fC(180, 118, 18) + dot(120, 118, 8) + dot(180, 118, 8) + fR(116, 148, 68, 18, 6) + ln("M133 148 L133 166 M150 148 L150 166 M167 148 L167 166") +
+      fR(98, 186, 104, 84, 14) + fC(150, 228, 18) + fR(66, 192, 26, 72, 12) + fR(208, 192, 26, 72, 12) },
+    { id: "unicorn", name: "ゆにこーん", svg: BGR +
+      fC(82, 120, 28) + fC(70, 170, 28) + fC(84, 218, 26) + fC(218, 120, 28) + fC(230, 170, 28) + fC(216, 218, 26) +
+      fP("M108 78 L96 34 L132 64Z") + fP("M192 78 L204 34 L168 64Z") + fP("M150 6 L134 80 L166 80Z") + fE(150, 172, 68, 84) +
+      ln("M138 56 L162 46 M141 36 L158 28") + ln("M112 160 Q124 174 136 160 M164 160 Q176 174 188 160") +
+      dot(138, 206, 4) + dot(162, 206, 4) + ln("M140 226 Q150 236 160 226") + fC(104, 192, 10, PN) + fC(196, 192, 10, PN) },
+    { id: "fairy", name: "ようせい", svg: BGR +
+      fE(100, 160, 34, 66, -25) + fE(200, 160, 34, 66, 25) + fE(110, 205, 24, 38, 20) + fE(190, 205, 24, 38, -20) +
+      ln("M132 245 L128 278 M168 245 L172 278") + fP("M150 130 L98 240 Q150 262 202 240Z") +
+      ln("M138 142 L112 176 M162 142 L195 150 L238 112") + fC(150, 100, 30) + fP("M118 98 C118 58 182 58 182 98 C170 78 130 78 118 98Z") + fC(150, 56, 13) +
+      dot(138, 104, 4) + dot(162, 104, 4) + ln("M142 116 Q150 122 158 116") + fP(starD(244, 104, 16, 7)) },
+    { id: "dress", name: "どれす", svg: BGR +
+      ln("M128 88 Q150 112 172 88") + fP("M118 88 L182 88 L170 150 L130 150Z") + fP("M128 148 L172 148 L244 262 Q150 288 56 262Z") +
+      fR(124, 146, 52, 12, 4) + fP("M150 152 L128 134 L128 160Z") + fP("M150 152 L172 134 L172 160Z") + fC(150, 152, 7) +
+      ln("M118 88 L108 60 M182 88 L192 60") },
+    { id: "owl", name: "ふくろう", svg: BGR +
+      fP("M85 78 L105 42 L124 84Z") + fP("M215 78 L195 42 L176 84Z") + fE(150, 172, 88, 100) + fE(66, 188, 22, 58, 12) + fE(234, 188, 22, 58, -12) + fE(150, 205, 52, 58) +
+      fC(114, 128, 34) + fC(186, 128, 34) + fC(116, 130, 15) + fC(184, 130, 15) + dot(116, 130, 8) + dot(184, 130, 8) + fP("M138 154 L162 154 L150 176Z") +
+      ln("M126 200 Q138 212 150 200 Q162 212 174 200 M126 228 Q138 240 150 228 Q162 240 174 228") + ln("M126 270 L116 288 M126 270 L128 290 M174 270 L172 290 M174 270 L184 288") },
+    { id: "duck", name: "あひる", svg: BGR +
+      fP("M48 178 L20 142 L68 156Z") + fE(135, 188, 88, 60) + fE(122, 194, 40, 28, -15) + fC(190, 108, 46) + fE(238, 120, 28, 12, 10) + dot(202, 96, 6) + fC(206, 120, 8, PN) +
+      ln("M14 264 Q44 250 74 264 T134 264 T194 264 T254 264 T300 264") },
+    { id: "star", name: "ほし", svg: BGR +
+      fP("M150 28 L180 108 L266 112 L199 165 L222 248 L150 202 L78 248 L101 165 L34 112 L120 108Z") +
+      dot(128, 150, 8) + dot(172, 150, 8) + ln("M128 178 Q150 198 172 178") + fC(106, 172, 9, PN) + fC(194, 172, 9, PN) },
+    { id: "heart", name: "はーと", svg: BGR +
+      fP("M150 262 C42 190 28 112 62 76 C92 46 134 58 150 96 C166 58 208 46 238 76 C272 112 258 190 150 262Z") +
+      dot(122, 128, 9) + dot(178, 128, 9) + ln("M128 160 Q150 184 172 160") + fC(100, 156, 11, PN) + fC(200, 156, 11, PN) },
+    { id: "moon", name: "おつきさま", svg: BGR +
+      fP("M190 36 A112 112 0 1 0 262 206 A94 94 0 0 1 190 36Z") + fP(starD(228, 70, 18, 8)) + fP(starD(250, 140, 12, 5)) + fP(starD(40, 50, 11, 5)) +
+      dot(98, 148, 6) + ln("M92 178 Q110 192 128 180") },
+    { id: "balloons", name: "ふうせん", svg: BGR +
+      ln("M104 152 Q118 214 150 270 M182 138 Q170 204 150 270 M222 168 Q196 224 150 270") +
+      fE(100, 105, 44, 54, -8) + fE(182, 92, 42, 52, 6) + fE(222, 128, 36, 46, 12) +
+      fP("M96 156 L88 170 L106 168Z") + fP("M180 142 L172 156 L190 154Z") + fP("M220 172 L212 186 L230 184Z") },
+    { id: "tulip", name: "ちゅーりっぷ", svg: BGR +
+      fR(144, 150, 12, 124, 3) + fP("M150 272 C100 252 85 212 90 182 C130 202 150 232 150 272Z") + fP("M150 272 C200 252 215 212 210 182 C170 202 150 232 150 272Z") +
+      fP("M95 66 L95 126 C95 172 205 172 205 126 L205 66 L175 98 L150 58 L125 98Z") },
+    { id: "sunflower", name: "ひまわり", svg: BGR +
+      fR(144, 170, 12, 108, 3) + fP("M150 250 C108 240 92 214 96 192 C130 202 150 220 150 250Z") +
+      ring(12, 150, 112, 62, function (x, y, a) { return fE(x, y, 32, 15, Math.round(a * 180 / Math.PI)); }) + fC(150, 112, 40) +
+      dot(136, 100, 3) + dot(164, 100, 3) + dot(150, 112, 3) + dot(136, 124, 3) + dot(164, 124, 3) },
+    { id: "cherry", name: "さくらんぼ", svg: BGR +
+      ln("M150 58 L108 192 M150 58 L196 184") + fP("M150 58 C170 28 210 28 228 44 C208 68 170 72 150 58Z") + fC(106, 202, 36) + fC(198, 196, 36) },
+    { id: "crab", name: "かに", svg: BGR +
+      ln("M80 202 L40 224 M86 218 L52 248 M220 202 L260 224 M214 218 L248 248 M96 160 L62 126 M204 160 L238 126") +
+      fC(54, 116, 26) + fC(246, 116, 26) + ln("M42 100 L54 116 M258 100 L246 116") + ln("M130 142 L125 114 M170 142 L175 114") + fE(150, 188, 80, 52) +
+      fC(125, 108, 10) + fC(175, 108, 10) + dot(125, 108, 4) + dot(175, 108, 4) + ln("M130 196 Q150 214 170 196") },
+    { id: "bee", name: "みつばち", svg: BGR +
+      fE(140, 104, 30, 44, -15) + fE(188, 106, 26, 40, 15) + fE(158, 172, 72, 52) +
+      fP("M136 124 Q126 172 138 220 L156 220 Q144 172 154 122Z") + fP("M178 128 Q170 172 180 216 L196 214 Q186 172 194 126Z") +
+      fP("M230 170 L258 176 L230 184Z") + fC(80, 168, 32) + dot(70, 160, 5) + ln("M70 182 Q82 192 94 182 M72 138 Q66 118 52 112 M88 136 Q92 114 104 106") }
+  ]);
+
+  SHAPES.push.apply(SHAPES, [
+    { name: "たいよう", d: "M150 85 A65 65 0 1 1 150 215 A65 65 0 1 1 150 85",
+      deco: ring(12, 150, 150, 112, function (x, y, a) { return ln("M" + n1(150 + 90 * Math.cos(a)) + " " + n1(150 + 90 * Math.sin(a)) + " L" + x + " " + y); }) + face(150, 140, 22) },
+    { name: "おつきさま", d: "M190 36 A112 112 0 1 0 262 206 A94 94 0 0 1 190 36Z",
+      deco: dot(98, 148, 6) + ln("M92 178 Q110 192 128 180") + '<path class="p" d="' + starD(232, 64, 14, 6) + '"/>' },
+    { name: "くも", d: "M80 225 A40 40 0 0 1 80 145 A58 58 0 0 1 185 112 A50 50 0 0 1 240 160 A38 38 0 0 1 222 225Z",
+      deco: face(150, 165, 26) },
+    { name: "しずく", d: "M150 40 C185 95 232 135 232 185 A82 82 0 0 1 68 185 C68 135 115 95 150 40Z",
+      deco: face(150, 175, 24) + ln("M100 190 Q104 214 124 224") },
+    { name: "はっぱ", d: "M60 245 C45 130 130 50 250 52 C258 170 190 252 60 245Z",
+      deco: ln("M60 245 L205 100 M118 190 L118 158 M150 160 L184 162 M96 218 L72 206") },
+    { name: "ちょうちょ", d: "M150 100 C110 20 30 40 50 120 C60 160 110 150 150 150 C110 162 60 200 90 250 C120 272 145 222 150 190 C155 222 180 272 210 250 C240 200 190 162 150 150 C190 150 240 160 250 120 C270 40 190 20 150 100Z",
+      deco: ln("M150 100 Q135 70 120 62 M150 100 Q165 70 180 62") + oC(100, 100, 16) + oC(200, 100, 16) },
+    { name: "かさ", d: "M40 150 A110 110 0 0 1 260 150 Q235 128 205 150 Q177 128 150 150 Q123 128 95 150 Q65 128 40 150Z",
+      deco: ln("M150 150 L150 245 Q150 272 124 266 M150 40 L96 140 M150 40 L204 140") },
+    { name: "おうち", d: "M58 252 L58 140 L150 62 L242 140 L242 252Z",
+      deco: ln("M130 252 L130 200 L170 200 L170 252 M82 165 H112 V195 H82Z M188 165 H218 V195 H188Z") },
+    { name: "ろけっと", d: "M150 38 C198 78 212 150 198 218 L102 218 C88 150 102 78 150 38Z",
+      deco: oC(150, 120, 22) + ln("M104 170 L68 238 L102 218 M196 170 L232 238 L198 218 M125 218 L150 262 L175 218") },
+    { name: "おふね", d: "M42 178 L258 178 L222 238 L78 238Z",
+      deco: ln("M150 178 L150 58 M150 64 L218 160 L150 160Z M20 262 Q40 250 60 262 T100 262 T140 262 T180 262 T220 262 T260 262") },
+    { name: "あいす", d: "M92 160 C52 150 56 66 150 58 C244 66 248 150 208 160 L150 268Z",
+      deco: ln("M108 186 L158 246 M192 186 L142 246 M96 160 L204 160") + oC(150, 42, 12) + dot(128, 112, 6) + dot(172, 112, 6) },
+    { name: "ばなな", d: "M70 80 C60 190 130 262 248 232 C252 217 246 205 236 206 C160 214 112 160 108 78Z",
+      deco: ln("M70 80 L84 56 L108 78") },
+    { name: "きのこ", d: "M42 172 C42 70 258 70 258 172 L192 172 L196 246 L104 246 L108 172Z",
+      deco: oC(96, 130, 14) + oC(158, 108, 16) + oC(212, 140, 12) + dot(135, 206, 5) + dot(165, 206, 5) },
+    { name: "たまご", d: "M150 40 C215 40 235 140 235 185 A85 85 0 0 1 65 185 C65 140 85 40 150 40Z",
+      deco: ln("M72 170 L98 150 L124 172 L150 148 L176 172 L202 150 L228 170") },
+    { name: "だいや", d: "M150 38 L242 120 L150 262 L58 120Z",
+      deco: ln("M58 120 L242 120 M105 120 L150 38 L195 120 L150 262 L105 120") },
+    { name: "ぶた", d: "M62 118 C52 85 80 58 108 70 C125 42 175 42 192 70 C220 58 248 85 238 118 C262 170 232 248 150 248 C68 248 38 170 62 118Z",
+      deco: '<ellipse class="o" cx="150" cy="190" rx="36" ry="26"/>' + dot(138, 190, 5) + dot(162, 190, 5) + dot(112, 140, 8) + dot(188, 140, 8) },
+    { name: "くじら", d: "M38 170 C38 100 110 68 176 84 C200 56 235 70 254 44 C268 88 244 116 232 132 C246 196 186 238 108 230 C62 224 38 204 38 170Z",
+      deco: dot(78, 150, 6) + ln("M62 174 Q78 186 96 180 M120 84 Q120 62 104 52 M120 84 Q124 62 140 52") },
+    { name: "おばけ", d: "M68 258 L68 122 A82 82 0 0 1 232 122 L232 258 L205 236 L178 258 L150 236 L122 258 L95 236Z",
+      deco: dotE(122, 130, 10, 15) + dotE(178, 130, 10, 15) + '<ellipse class="o" cx="150" cy="176" rx="14" ry="18"/>' },
+    { name: "うずまき", d: spiralD, deco: "" },
+    { name: "ふうせん", d: "M150 40 C210 40 236 100 216 150 C202 186 172 206 150 212 C128 206 98 186 84 150 C64 100 90 40 150 40Z",
+      deco: ln("M150 212 L138 232 L162 232Z M150 232 Q132 252 150 280") + ln("M110 80 Q100 96 102 116") },
+    { name: "いちご", d: "M62 100 C82 68 218 68 238 100 C242 172 196 248 150 268 C104 248 58 172 62 100Z",
+      deco: ln("M150 88 L116 54 L140 80 L150 40 L160 80 L184 54Z") + dotE(106, 126, 4, 6) + dotE(150, 122, 4, 6) + dotE(194, 126, 4, 6) + dotE(124, 166, 4, 6) + dotE(176, 166, 4, 6) + dotE(150, 206, 4, 6) },
+    { name: "すいか", d: "M36 128 A114 114 0 0 0 264 128Z",
+      deco: ln("M54 128 A96 96 0 0 0 246 128") + dotE(108, 160, 5, 8) + dotE(150, 184, 5, 8) + dotE(192, 160, 5, 8) },
+    { name: "にんじん", d: "M108 98 Q150 74 192 98 L150 270Z",
+      deco: ln("M150 92 Q130 60 112 46 M150 92 Q150 55 150 36 M150 92 Q170 60 188 46 M122 132 L144 132 M158 164 L180 164 M138 204 L158 204") }
+  ]);
+
+  var PALETTE = [
+    ["あか", "#e5484d"], ["だいだい", "#f5922f"], ["きいろ", "#f7d23e"], ["みどり", "#46b36b"], ["そらいろ", "#4fb3e8"],
+    ["ピンク", "#f48fb1"], ["むらさき", "#9b6fd6"], ["ちゃいろ", "#8b5a3c"], ["しろ", "#ffffff"]
+  ];
+
+  var STORE_KEY = "nazori-nurie.customs.v1", MAX_CUSTOM = 8;
+  var $ = function (s) { return document.querySelector(s); };
+  var host = $("#host"), picker = $("#picker"), cheer = $("#cheer"), chooser = $("#chooser");
+  var paletteEl = $("#palette"), padbar = $("#padbar"), adult = $("#adult");
+  var hist = $("#hist"), tools = $("#tools"), viewer = $("#viewer");
+  var NS = "http://www.w3.org/2000/svg", tool = "fill", brushes = {}, history = {};
+  var HKEY = "nazori-nurie.history.v1";
+  var mode = "trace", sel = { trace: "s0", color: "p0" };
+  var color = PALETTE[0][1], fills = {}, customs = [];
+  var reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var traceState = null, painting = false;
+
+  PICS.forEach(function (p) { fills[p.id] = {}; brushes[p.id] = []; });
+
+  /* ---------- なぞった けっかの きろく(えごとに さいきん3かい) ---------- */
+  function loadHistory() {
+    try { history = JSON.parse(localStorage.getItem(HKEY) || "{}") || {}; } catch (err) { history = {}; }
+  }
+  function saveHistory() {
+    try { localStorage.setItem(HKEY, JSON.stringify(history)); } catch (err) { /* ほぞんできなくても あそべます */ }
+  }
+  function pushHist(key, entry) {
+    var a = history[key] || [];
+    a.unshift(entry);
+    history[key] = a.slice(0, 3);
+    saveHistory();
+    renderHist();
+  }
+  function ptsToD(pts) {
+    var out = [pts[0]], l = pts[0], i;
+    for (i = 1; i < pts.length; i++) {
+      if (Math.hypot(pts[i][0] - l[0], pts[i][1] - l[1]) >= 3) { out.push(pts[i]); l = pts[i]; }
+    }
+    var last = pts[pts.length - 1];
+    if (out[out.length - 1] !== last) out.push(last);
+    var r = function (v) { return Math.round(v * 10) / 10; };
+    var d = "M" + r(out[0][0]) + " " + r(out[0][1]);
+    if (out.length === 1) d += " l0.01 0";
+    for (i = 1; i < out.length; i++) d += " L" + r(out[i][0]) + " " + r(out[i][1]);
+    return d;
+  }
+  function recordShape(it, list) {
+    var strokes = list.filter(function (s) { return s.pts.length; }).map(function (s) { return { d: ptsToD(s.pts), c: s.c }; });
+    pushHist(it.key, { t: Date.now(), strokes: strokes });
+  }
+  function recordCustom(c, layers) {
+    var t = document.createElement("canvas");
+    t.width = t.height = 200;
+    var g = t.getContext("2d"), url = "";
+    g.fillStyle = "#fff"; g.fillRect(0, 0, 200, 200);
+    layers.forEach(function (l) { g.drawImage(l, 0, 0, 200, 200); });
+    try { url = t.toDataURL("image/jpeg", 0.75); } catch (err) { return; }
+    pushHist("c" + c.id, { t: Date.now(), img: url });
+  }
+  function dateLabel(t) {
+    var d = new Date(t), mm = d.getMinutes();
+    return (d.getMonth() + 1) + "/" + d.getDate() + " " + d.getHours() + ":" + (mm < 10 ? "0" : "") + mm;
+  }
+  function histHtml(it, e) {
+    if (e.img) return '<img alt="" src="' + String(e.img).replace(/"/g, "") + '">';
+    var s = it.s;
+    return '<svg class="pic" viewBox="0 0 300 300"><rect width="300" height="300" rx="20" fill="#fff"/><path class="guide" d="' + s.d + '"/>' +
+      (e.strokes || []).map(function (k) {
+        var col = /^#[0-9a-fA-F]{6}$/.test(k.c) ? k.c : "#3b6fd8";
+        return '<path class="stroke" style="stroke:' + col + '" d="' + String(k.d).replace(/[^MLl0-9. \-]/g, "") + '"/>';
+      }).join("") + (s.deco || "") + "</svg>";
+  }
+  function renderHist() {
+    var it = currentItem();
+    if (mode !== "trace" || padMode || it.kind === "add") { hist.hidden = true; return; }
+    hist.hidden = false;
+    hist.innerHTML = "";
+    var title = document.createElement("div");
+    title.className = "ht"; title.textContent = "まえの けっか(さいきん 3かい)";
+    hist.appendChild(title);
+    var row = document.createElement("div"), arr = history[it.key] || [], i;
+    row.className = "hrow";
+    for (i = 0; i < 3; i++) {
+      var e = arr[i], slot;
+      if (e) {
+        slot = document.createElement("button");
+        slot.className = "hslot";
+        slot.setAttribute("aria-label", dateLabel(e.t) + " のけっかを おおきく みる");
+        slot.innerHTML = '<span class="th">' + histHtml(it, e) + "</span><span>" + dateLabel(e.t) + "</span>";
+        slot.addEventListener("click", (function (en) { return function () { openViewer(it, en); }; })(e));
+      } else {
+        slot = document.createElement("div");
+        slot.className = "hslot empty";
+        slot.innerHTML = '<span class="th">まだ</span><span>&nbsp;</span>';
+      }
+      row.appendChild(slot);
+    }
+    hist.appendChild(row);
+  }
+  function openViewer(it, e) {
+    $("#vTitle").textContent = dateLabel(e.t);
+    $("#vBody").innerHTML = histHtml(it, e);
+    cheer.hidden = true; chooser.hidden = true;
+    viewer.hidden = false;
+  }
+  $("#vClose").addEventListener("click", function () { viewer.hidden = true; });
+
+  function makeBrushPath(b) {
+    var el = document.createElementNS(NS, "path");
+    el.setAttribute("d", b.d); el.setAttribute("fill", "none"); el.setAttribute("stroke", b.c);
+    el.setAttribute("stroke-width", b.w); el.setAttribute("stroke-linecap", "round"); el.setAttribute("stroke-linejoin", "round");
+    return el;
+  }
+
+  function packColor(hex) { return parseInt(hex.slice(1), 16); }
+  function penColor() { return color === "#ffffff" ? "#3b6fd8" : color; }
+  function cpos(cv, e) {
+    var r = cv.getBoundingClientRect();
+    return [(e.clientX - r.left) / r.width * SZ, (e.clientY - r.top) / r.height * SZ];
+  }
+
+  /* ---------- えらぶ行 ---------- */
+  function itemsFor(m) {
+    var a = [{ kind: "add", key: "add", name: "じぶんの えを ふやす" }];
+    customs.forEach(function (c) { a.push({ kind: "custom", c: c, key: "c" + c.id, name: "じぶんの え" }); });
+    if (m === "trace") SHAPES.forEach(function (s, i) { a.push({ kind: "shape", s: s, key: "s" + i, name: s.name }); });
+    else PICS.forEach(function (p, i) { a.push({ kind: "pic", p: p, key: "p" + i, name: p.name }); });
+    return a;
+  }
+  function currentItem() {
+    var list = itemsFor(mode), i;
+    for (i = 0; i < list.length; i++) if (list[i].key === sel[mode]) return list[i];
+    for (i = 0; i < list.length; i++) if (list[i].kind === "shape" || list[i].kind === "pic") return list[i];
+    return list[0];
+  }
+
+  function picSvg(pic, cls) {
+    var t = document.createElement("div");
+    t.innerHTML = '<svg class="pic ' + (cls || "") + '" viewBox="0 0 300 300">' + pic.svg + "</svg>";
+    var s = t.firstChild, f = fills[pic.id];
+    s.querySelectorAll(".f").forEach(function (el, i) {
+      el.setAttribute("data-i", i);
+      if (f[i]) el.style.fill = f[i];
+    });
+    /* ふでで ぬった所。ぐるっと ひとまとめにして、線の上にも かさねる(しろは けしゴム) */
+    var bg = document.createElementNS(NS, "g");
+    bg.setAttribute("class", "brush");
+    bg.style.mixBlendMode = "multiply";
+    bg.style.pointerEvents = "none";
+    (brushes[pic.id] || []).forEach(function (b) { bg.appendChild(makeBrushPath(b)); });
+    s.appendChild(bg);
+    return s;
+  }
+
+  function renderPicker(reveal) {
+    var keep = picker.scrollLeft, curKey = currentItem().key;
+    picker.innerHTML = "";
+    itemsFor(mode).forEach(function (it) {
+      var b = document.createElement("button");
+      b.className = "pick" + (it.kind === "add" ? " add" : "");
+      b.setAttribute("aria-label", it.name);
+      b.setAttribute("aria-current", String(it.key === curKey));
+      if (it.kind === "add") {
+        b.innerHTML = '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 6v20M6 16h20" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg>';
+      } else if (it.kind === "custom") {
+        b.innerHTML = '<img alt="" src="' + it.c.url + '">';
+      } else if (it.kind === "shape") {
+        b.innerHTML = '<svg class="pic" viewBox="0 0 300 300"><rect width="300" height="300" rx="36" fill="#fff"/><path d="' + it.s.d + '" fill="none" stroke="#8fa9d1" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>' + (it.s.deco || "") + "</svg>";
+      } else {
+        b.appendChild(picSvg(it.p, ""));
+      }
+      b.addEventListener("click", function () {
+        if (it.kind === "add") { showChooser(); return; }
+        sel[mode] = it.key;
+        render();
+      });
+      picker.appendChild(b);
+    });
+    picker.scrollLeft = keep;
+    if (reveal) {
+      var cur = picker.querySelector('[aria-current="true"]');
+      if (cur) cur.scrollIntoView({ inline: "nearest", block: "nearest" });
+    }
+  }
+
+  /* ---------- なぞる(ぶんぶんの かたち) ---------- */
+  function renderTrace(it) {
+    var sh = it.s;
+    host.innerHTML =
+      '<svg class="main pic" id="board" viewBox="0 0 300 300" role="img" aria-label="' + sh.name + 'をなぞる">' +
+      '<rect width="300" height="300" fill="#fff"/>' +
+      '<path id="guide" class="guide" d="' + sh.d + '"/>' +
+      '<g id="done"></g>' +
+      '<path class="dots" d="' + sh.d + '"/>' +
+      '<g id="start"><circle r="17" fill="#3fae6a" stroke="#2b2a3a" stroke-width="4"/><polygon points="-5,-8 9,0 -5,8" fill="#fff"/></g>' +
+      '<g id="strokes"></g><g class="deco">' + (sh.deco || "") + '</g>' +
+      '<circle id="hint" r="10" fill="#ffcf33" stroke="#2b2a3a" stroke-width="4"><animateMotion dur="4.5s" repeatCount="indefinite"><mpath href="#guide"/></animateMotion></circle>' +
+      "</svg>";
+    var board = $("#board"), guide = $("#guide"), strokes = $("#strokes"), hint = $("#hint"), doneG = $("#done");
+    var closed = /[zZ]\s*$/.test(sh.d.trim());
+    var L = guide.getTotalLength(), n = Math.ceil(L / 5);
+    var pts = [], i;
+    for (i = 0; i <= n; i++) { var q = guide.getPointAtLength(L * i / n); pts.push([q.x, q.y]); }
+    /* Zが無くても、はじめと おわりが かさなる線は ぐるっと一周する線として あつかう */
+    if (Math.hypot(pts[0][0] - pts[n][0], pts[0][1] - pts[n][1]) < 3) closed = true;
+    if (closed) pts.pop();
+    var N = pts.length, W = 16, R2 = 22 * 22;
+    var s0 = pts[0];
+    $("#start").setAttribute("transform", "translate(" + s0[0] + " " + s0[1] + ")");
+    if (reduce) hint.remove();
+    var st = { cov: new Uint8Array(N), count: 0, done: false, cur: null, d: "", last: null, anchor: -1, prev: -1, list: [] };
+    traceState = st;
+    st.reset = function () {
+      strokes.innerHTML = ""; doneG.innerHTML = ""; st.list = [];
+      st.cov = new Uint8Array(N); st.count = 0; st.done = false; st.cur = null; st.anchor = -1; st.prev = -1;
+      cheer.hidden = true;
+      if (!reduce && !hint.isConnected) board.appendChild(hint);
+      hint.style.display = "";
+    };
+    function pos(e) {
+      var r = board.getBoundingClientRect();
+      return [(e.clientX - r.left) / r.width * 300, (e.clientY - r.top) / r.height * 300];
+    }
+    function visit(k) {
+      if (st.cov[k]) return;
+      st.cov[k] = 1; st.count++;
+      var c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      c.setAttribute("cx", pts[k][0].toFixed(1)); c.setAttribute("cy", pts[k][1].toFixed(1)); c.setAttribute("r", "15");
+      c.setAttribute("fill", "#8fdca6");
+      doneG.appendChild(c);
+    }
+    function nearest(p) {
+      var bi = -1, bd = R2, k, idx, base = st.anchor >= 0 ? st.anchor : st.prev, span = st.anchor >= 0 ? W : 24;
+      if (base >= 0) {
+        for (k = -span; k <= span; k++) {
+          idx = base + k;
+          if (closed) idx = (idx + N) % N; else if (idx < 0 || idx >= N) continue;
+          var dx = pts[idx][0] - p[0], dy = pts[idx][1] - p[1], dd = dx * dx + dy * dy;
+          if (dd < bd) { bd = dd; bi = idx; }
+        }
+        if (bi >= 0 || st.anchor >= 0) return bi;
+      }
+      for (idx = 0; idx < N; idx++) {
+        var ex = pts[idx][0] - p[0], ey = pts[idx][1] - p[1], ed = ex * ex + ey * ey;
+        if (ed < bd) { bd = ed; bi = idx; }
+      }
+      return bi;
+    }
+    function mark(p) {
+      var bi = nearest(p);
+      if (bi >= 0) {
+        var from = st.anchor >= 0 ? st.anchor : (st.prev >= 0 ? st.prev : -1);
+        var d = from >= 0 ? bi - from : 0;
+        if (closed) { if (d > N / 2) d -= N; else if (d < -N / 2) d += N; }
+        /* 指を離して置きなおしても、ちかければ 間もつなげる */
+        if (from < 0 || (st.anchor < 0 && Math.abs(d) > 10)) visit(bi);
+        else {
+          var s = d >= 0 ? 1 : -1, m = Math.abs(d), k;
+          for (k = 0; k <= m; k++) visit(closed ? ((from + s * k) % N + N) % N : from + s * k);
+        }
+        /* 終わりのある線は、はしの ちかくまで なぞれたら はしまで とどいたことにする */
+        if (!closed) {
+          var e;
+          if (bi <= 6) for (e = 0; e <= bi; e++) visit(e);
+          if (bi >= N - 7) for (e = bi; e < N; e++) visit(e);
+        }
+        st.anchor = bi; st.prev = bi;
+      }
+      if (!st.done && st.count >= N - 2) { st.done = true; recordShape(it, st.list); setTimeout(showCheer, 450); }
+    }
+    function seg(a, b) {
+      var dx = b[0] - a[0], dy = b[1] - a[1], len = Math.sqrt(dx * dx + dy * dy), k = Math.max(1, Math.ceil(len / 5)), j;
+      for (j = 1; j <= k; j++) mark([a[0] + dx * j / k, a[1] + dy * j / k]);
+    }
+    board.addEventListener("pointerdown", function (e) {
+      if (st.done) return;
+      e.preventDefault();
+      board.setPointerCapture(e.pointerId);
+      hint.style.display = "none";
+      var p = pos(e);
+      st.anchor = -1;
+      st.cur = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      st.cur.setAttribute("class", "stroke");
+      st.cur.style.stroke = penColor();
+      st.d = "M" + p[0].toFixed(1) + " " + p[1].toFixed(1) + " l0.01 0";
+      st.cur.setAttribute("d", st.d);
+      strokes.appendChild(st.cur);
+      st.last = p;
+      st.list.push({ c: penColor(), pts: [p] });
+      mark(p);
+    });
+    board.addEventListener("pointermove", function (e) {
+      if (!st.cur || st.done) return;
+      var p = pos(e);
+      st.list[st.list.length - 1].pts.push(p);
+      st.d += " L" + p[0].toFixed(1) + " " + p[1].toFixed(1);
+      st.cur.setAttribute("d", st.d);
+      seg(st.last, p);
+      st.last = p;
+    });
+    function up() { st.cur = null; }
+    board.addEventListener("pointerup", up);
+    board.addEventListener("pointercancel", up);
+  }
+
+  /* ---------- ぬる(ぶんぶんの え) ---------- */
+  function renderColor(pic) {
+    var s = picSvg(pic, "main");
+    s.setAttribute("role", "img");
+    s.setAttribute("aria-label", pic.name + "のぬりえ");
+    host.innerHTML = "";
+    host.appendChild(s);
+    function fillAt(e) {
+      var el = document.elementFromPoint(e.clientX, e.clientY);
+      if (!el || !el.classList || !el.classList.contains("f") || !s.contains(el)) return;
+      var i = el.getAttribute("data-i");
+      if (fills[pic.id][i] === color) return;
+      fills[pic.id][i] = color;
+      el.style.fill = color;
+    }
+    var bgrp = s.querySelector("g.brush"), curB = null, curEl = null;
+    function sp(e) {
+      var r = s.getBoundingClientRect();
+      return [(e.clientX - r.left) / r.width * 300, (e.clientY - r.top) / r.height * 300];
+    }
+    s.addEventListener("pointerdown", function (e) {
+      e.preventDefault(); painting = true;
+      if (tool === "fill") { fillAt(e); return; }
+      s.setPointerCapture(e.pointerId);
+      var p = sp(e);
+      curB = { d: "M" + p[0].toFixed(1) + " " + p[1].toFixed(1) + " l0.01 0", c: color, w: tool === "fat" ? 28 : 12 };
+      brushes[pic.id].push(curB);
+      curEl = makeBrushPath(curB);
+      bgrp.appendChild(curEl);
+    });
+    s.addEventListener("pointermove", function (e) {
+      if (!painting) return;
+      if (tool === "fill") { fillAt(e); return; }
+      if (!curB) return;
+      var p = sp(e);
+      curB.d += " L" + p[0].toFixed(1) + " " + p[1].toFixed(1);
+      curEl.setAttribute("d", curB.d);
+    });
+    function end() { if (painting) { painting = false; curB = null; curEl = null; renderPicker(false); } }
+    s.addEventListener("pointerup", end);
+    s.addEventListener("pointercancel", end);
+    s.addEventListener("pointerleave", end);
+  }
+
+  /* ---------- じぶんの え ---------- */
+  function canvasHTML(ids) {
+    return '<div class="cwrap">' + ids.map(function (id) {
+      return '<canvas class="cv" id="' + id + '" width="' + SZ + '" height="' + SZ + '"></canvas>';
+    }).join("") + "</div>";
+  }
+
+  function tracePts(c) {
+    if (c.pts) return c.pts;
+    var step = 9, out = [];
+    for (var pass = 0; pass < 2; pass++) {
+      out = [];
+      for (var y = 4; y < SZ; y += step) for (var x = 4; x < SZ; x += step) if (c.mask[y * SZ + x]) out.push(x, y);
+      if (out.length >= 60) break;
+      step = 4;
+    }
+    c.pts = out;
+    return out;
+  }
+
+  function renderCustomTrace(c) {
+    host.innerHTML = canvasHTML(["cvBase", "cvDone", "cvPen"]);
+    var base = $("#cvBase"), dn = $("#cvDone"), pen = $("#cvPen");
+    base.style.pointerEvents = "none"; dn.style.pointerEvents = "none";
+    if (!c.band) c.band = dilate(c.mask, SZ, 6);
+    var bg = base.getContext("2d"), img = bg.createImageData(SZ, SZ), d = img.data, i;
+    for (i = 0; i < SZ * SZ; i++) {
+      var o = i * 4;
+      if (c.mask[i]) { d[o] = 143; d[o + 1] = 169; d[o + 2] = 209; }
+      else if (c.band[i]) { d[o] = 214; d[o + 1] = 227; d[o + 2] = 244; }
+      else { d[o] = 255; d[o + 1] = 255; d[o + 2] = 255; }
+      d[o + 3] = 255;
+    }
+    bg.putImageData(img, 0, 0);
+    var dg = dn.getContext("2d"), pg = pen.getContext("2d");
+    pg.lineCap = "round"; pg.lineJoin = "round"; pg.lineWidth = 24;
+    dg.fillStyle = "#8fdca6";
+    var pts = tracePts(c), M = pts.length / 2, R2 = 20 * 20;
+    var st = { cov: new Uint8Array(M), count: 0, done: false, last: null, down: false };
+    traceState = st;
+    st.reset = function () {
+      pg.clearRect(0, 0, SZ, SZ); dg.clearRect(0, 0, SZ, SZ);
+      st.cov = new Uint8Array(M); st.count = 0; st.done = false; st.last = null; st.down = false;
+      cheer.hidden = true;
+    };
+    function mark(p) {
+      for (var k = 0; k < M; k++) {
+        if (st.cov[k]) continue;
+        var dx = pts[k * 2] - p[0], dy = pts[k * 2 + 1] - p[1];
+        if (dx * dx + dy * dy < R2) {
+          st.cov[k] = 1; st.count++;
+          dg.beginPath(); dg.arc(pts[k * 2], pts[k * 2 + 1], 11, 0, 6.2832); dg.fill();
+        }
+      }
+      if (!st.done && st.count >= M * 0.96) { st.done = true; recordCustom(c, [base, dn, pen]); setTimeout(showCheer, 450); }
+    }
+    function seg(a, b) {
+      var dx = b[0] - a[0], dy = b[1] - a[1], len = Math.sqrt(dx * dx + dy * dy), k = Math.max(1, Math.ceil(len / 6)), j;
+      for (j = 1; j <= k; j++) mark([a[0] + dx * j / k, a[1] + dy * j / k]);
+    }
+    pen.addEventListener("pointerdown", function (e) {
+      if (st.done) return;
+      e.preventDefault(); pen.setPointerCapture(e.pointerId);
+      var p = cpos(pen, e);
+      st.down = true; st.last = p;
+      pg.strokeStyle = penColor();
+      pg.beginPath(); pg.moveTo(p[0], p[1]); pg.lineTo(p[0] + 0.01, p[1]); pg.stroke();
+      mark(p);
+    });
+    pen.addEventListener("pointermove", function (e) {
+      if (!st.down || st.done) return;
+      var p = cpos(pen, e);
+      pg.beginPath(); pg.moveTo(st.last[0], st.last[1]); pg.lineTo(p[0], p[1]); pg.stroke();
+      seg(st.last, p);
+      st.last = p;
+    });
+    function up() { st.down = false; }
+    pen.addEventListener("pointerup", up);
+    pen.addEventListener("pointercancel", up);
+  }
+
+  function paintColor(c, d) {
+    for (var i = 0, N = SZ * SZ; i < N; i++) {
+      var col = c.color[i], a = c.ink[i] / 255, o = i * 4, b = 1 - a;
+      d[o] = ((col >> 16) & 255) * b + 43 * a;
+      d[o + 1] = ((col >> 8) & 255) * b + 42 * a;
+      d[o + 2] = (col & 255) * b + 58 * a;
+      d[o + 3] = 255;
+    }
+  }
+
+  function renderCustomColor(c) {
+    host.innerHTML = canvasHTML(["cvColor"]);
+    var cv = $("#cvColor"), g = cv.getContext("2d"), img = g.createImageData(SZ, SZ), down = false;
+    paintColor(c, img.data); g.putImageData(img, 0, 0);
+    function fillAt(e) {
+      var p = cpos(cv, e), x = Math.floor(p[0]), y = Math.floor(p[1]);
+      if (x < 0 || y < 0 || x >= SZ || y >= SZ) return;
+      if (floodFill(c, SZ, x, y, packColor(color))) {
+        c.dirty = true; paintColor(c, img.data); g.putImageData(img, 0, 0);
+      }
+    }
+    var lastP = null;
+    function disc(x, y, r) {
+      var rgb = packColor(color), r2 = r * r;
+      var y0 = Math.max(0, Math.floor(y - r)), y1 = Math.min(SZ - 1, Math.ceil(y + r));
+      var x0 = Math.max(0, Math.floor(x - r)), x1 = Math.min(SZ - 1, Math.ceil(x + r));
+      for (var yy = y0; yy <= y1; yy++) for (var xx = x0; xx <= x1; xx++) {
+        var dx = xx - x, dy = yy - y;
+        if (dx * dx + dy * dy <= r2) c.color[yy * SZ + xx] = rgb;
+      }
+    }
+    function brushTo(p) {
+      var r = tool === "fat" ? 22 : 9, a = lastP || p, dx = p[0] - a[0], dy = p[1] - a[1];
+      var k = Math.max(1, Math.ceil(Math.sqrt(dx * dx + dy * dy) / (r / 2)));
+      for (var j = 1; j <= k; j++) disc(a[0] + dx * j / k, a[1] + dy * j / k, r);
+      lastP = p; c.dirty = true;
+      paintColor(c, img.data); g.putImageData(img, 0, 0);
+    }
+    cv.addEventListener("pointerdown", function (e) {
+      e.preventDefault(); cv.setPointerCapture(e.pointerId); down = true;
+      if (tool === "fill") fillAt(e); else { lastP = null; brushTo(cpos(cv, e)); }
+    });
+    cv.addEventListener("pointermove", function (e) {
+      if (!down) return;
+      if (tool === "fill") fillAt(e); else brushTo(cpos(cv, e));
+    });
+    function end() { down = false; lastP = null; }
+    cv.addEventListener("pointerup", end);
+    cv.addEventListener("pointercancel", end);
+  }
+
+  /* 写真や絵 → 線画データ */
+  function makeCustom(src, w, h, id, direct) {
+    var cv = document.createElement("canvas");
+    cv.width = cv.height = SZ;
+    var g = cv.getContext("2d", { willReadFrequently: true });
+    g.fillStyle = "#fff"; g.fillRect(0, 0, SZ, SZ);
+    var s = Math.min(SZ / w, SZ / h), dw = w * s, dh = h * s;
+    g.drawImage(src, (SZ - dw) / 2, (SZ - dh) / 2, dw, dh);
+    var im = g.getImageData(0, 0, SZ, SZ);
+    var c = prepare(computeInk(im.data, SZ, direct), SZ);
+    if (c.count < 150) return null;
+    var out = g.createImageData(SZ, SZ), d = out.data;
+    for (var i = 0; i < SZ * SZ; i++) { var v = 255 - c.ink[i]; d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = v; d[i * 4 + 3] = 255; }
+    g.putImageData(out, 0, 0);
+    c.url = cv.toDataURL("image/png");
+    c.id = id || String(Date.now());
+    return c;
+  }
+  function saveCustoms() {
+    try {
+      var arr = customs.map(function (c) { return { id: c.id, url: c.url }; });
+      localStorage.setItem(STORE_KEY, JSON.stringify(arr));
+    } catch (err) { /* 保存できなくても あそべます */ }
+  }
+  function loadCustoms() {
+    var arr = [];
+    try { arr = JSON.parse(localStorage.getItem(STORE_KEY) || "[]"); } catch (err) { arr = []; }
+    if (!arr.length) return;
+    var res = new Array(arr.length), left = arr.length;
+    function one() {
+      if (--left > 0) return;
+      customs = res.filter(Boolean);
+      render();
+    }
+    arr.forEach(function (o, i) {
+      var im = new Image();
+      im.onload = function () { res[i] = makeCustom(im, im.naturalWidth, im.naturalHeight, o.id, true); one(); };
+      im.onerror = one;
+      im.src = o.url;
+    });
+  }
+  function addCustom(c) {
+    if (!c) { showChooser("せんが みつかりませんでした。くろい ペンで、おおきく かいてね。"); return; }
+    customs.unshift(c);
+    while (customs.length > MAX_CUSTOM) customs.pop();
+    saveCustoms();
+    sel.trace = sel.color = "c" + c.id;
+    render();
+  }
+
+  /* えらびかた・かくパッド */
+  var padMode = false;
+  function showChooser(msg) {
+    cheer.hidden = true;
+    $("#chMsg").textContent = msg || "かみに かいた えを しゃしんに とるか、ここで かきます。くろい ペンの えが おすすめ。";
+    chooser.hidden = false;
+  }
+  $("#chCancel").addEventListener("click", function () { chooser.hidden = true; });
+  $("#fileIn").addEventListener("change", function () {
+    var f = this.files && this.files[0], input = this;
+    if (!f) return;
+    var url = URL.createObjectURL(f), im = new Image();
+    im.onload = function () {
+      var c = makeCustom(im, im.naturalWidth, im.naturalHeight, null, false);
+      URL.revokeObjectURL(url); input.value = "";
+      chooser.hidden = true;
+      addCustom(c);
+    };
+    im.onerror = function () { URL.revokeObjectURL(url); input.value = ""; showChooser("しゃしんを ひらけませんでした。"); };
+    im.src = url;
+  });
+  $("#drawBtn").addEventListener("click", openPad);
+
+  function openPad() {
+    chooser.hidden = true; cheer.hidden = true;
+    padMode = true; traceState = null;
+    host.innerHTML = canvasHTML(["padcv"]);
+    paletteEl.hidden = true; padbar.hidden = false; adult.hidden = true; tools.hidden = true; hist.hidden = true; $("#nav").hidden = true;
+    var cv = $("#padcv"), g = cv.getContext("2d", { willReadFrequently: true }), last = null;
+    g.fillStyle = "#fff"; g.fillRect(0, 0, SZ, SZ);
+    g.strokeStyle = "#000"; g.fillStyle = "#000"; g.lineWidth = 10; g.lineCap = "round"; g.lineJoin = "round";
+    cv.addEventListener("pointerdown", function (e) {
+      e.preventDefault(); cv.setPointerCapture(e.pointerId);
+      last = cpos(cv, e);
+      g.beginPath(); g.arc(last[0], last[1], 5, 0, 6.2832); g.fill();
+    });
+    cv.addEventListener("pointermove", function (e) {
+      if (!last) return;
+      var p = cpos(cv, e);
+      g.beginPath(); g.moveTo(last[0], last[1]); g.lineTo(p[0], p[1]); g.stroke();
+      last = p;
+    });
+    function up() { last = null; }
+    cv.addEventListener("pointerup", up);
+    cv.addEventListener("pointercancel", up);
+    $("#padClear").onclick = function () { g.fillStyle = "#fff"; g.fillRect(0, 0, SZ, SZ); g.fillStyle = "#000"; };
+    $("#padBack").onclick = function () { render(); };
+    $("#padDone").onclick = function () {
+      var c = makeCustom(cv, SZ, SZ, null, true);
+      if (!c) { render(); showChooser("せんが みえません。もういちど かいてね。"); return; }
+      addCustom(c);
+    };
+  }
+
+  /* ---------- 全体 ---------- */
+  function showCheer() {
+    cheer.querySelectorAll("i").forEach(function (n) { n.remove(); });
+    var cols = PALETTE.map(function (c) { return c[1]; });
+    for (var i = 0; i < 18; i++) {
+      var c = document.createElement("i");
+      c.style.left = (Math.random() * 96) + "%";
+      c.style.background = cols[i % (cols.length - 1)];
+      c.style.setProperty("--d", (Math.random() * 0.6).toFixed(2) + "s");
+      cheer.appendChild(c);
+    }
+    cheer.hidden = false;
+  }
+
+  function render() {
+    cheer.hidden = true; chooser.hidden = true; viewer.hidden = true; padMode = false;
+    paletteEl.hidden = false; padbar.hidden = true; tools.hidden = mode !== "color"; $("#nav").hidden = false;
+    $("#tabTrace").setAttribute("aria-pressed", String(mode === "trace"));
+    $("#tabColor").setAttribute("aria-pressed", String(mode === "color"));
+    var it = currentItem();
+    traceState = null;
+    renderPicker(true);
+    renderHist();
+    if (it.kind === "shape") renderTrace(it);
+    else if (it.kind === "pic") renderColor(it.p);
+    else if (it.kind === "custom") { if (mode === "trace") renderCustomTrace(it.c); else renderCustomColor(it.c); }
+    adult.hidden = it.kind !== "custom";
+    disarm(); disarmDel();
+  }
+
+  var clearBtn = document.createElement("button");
+  var armed = false, armT = 0;
+  clearBtn.className = "clear";
+  function disarm() {
+    armed = false; clearTimeout(armT);
+    clearBtn.removeAttribute("data-armed");
+    clearBtn.innerHTML = "けす";
+    clearBtn.setAttribute("aria-label", mode === "trace" ? "なぞった線をけす" : "ぬった色をぜんぶけす");
+  }
+  clearBtn.addEventListener("click", function () {
+    if (mode === "trace") { if (traceState) traceState.reset(); return; }
+    var it = currentItem();
+    var any = it.kind === "pic" ? (Object.keys(fills[it.p.id]).length > 0 || brushes[it.p.id].length > 0) : (it.kind === "custom" && it.c.dirty);
+    if (any && !armed) {
+      armed = true;
+      clearBtn.setAttribute("data-armed", "true");
+      clearBtn.innerHTML = "もう<br>1かい";
+      armT = setTimeout(disarm, 2500);
+      return;
+    }
+    if (it.kind === "pic") { fills[it.p.id] = {}; brushes[it.p.id] = []; }
+    else if (it.kind === "custom") { it.c.color.fill(0xFFFFFF); it.c.dirty = false; }
+    render();
+  });
+
+  var delBtn = $("#delBtn"), delArmed = false, delT = 0;
+  function disarmDel() {
+    delArmed = false; clearTimeout(delT);
+    delBtn.removeAttribute("data-armed");
+    delBtn.textContent = "この えを けす(おとなの かた)";
+  }
+  delBtn.addEventListener("click", function () {
+    var it = currentItem();
+    if (it.kind !== "custom") return;
+    if (!delArmed) {
+      delArmed = true;
+      delBtn.setAttribute("data-armed", "true");
+      delBtn.textContent = "ほんとうに けす? もう1かい おす";
+      delT = setTimeout(disarmDel, 3000);
+      return;
+    }
+    customs = customs.filter(function (c) { return c !== it.c; });
+    saveCustoms();
+    delete history["c" + it.c.id]; saveHistory();
+    sel.trace = "s0"; sel.color = "p0";
+    render();
+  });
+
+  function buildPalette() {
+    PALETTE.forEach(function (c) {
+      var b = document.createElement("button");
+      b.className = "sw";
+      b.style.setProperty("--c", c[1]);
+      b.setAttribute("aria-label", c[0]);
+      b.setAttribute("aria-pressed", String(c[1] === color));
+      b.addEventListener("click", function () {
+        color = c[1];
+        paletteEl.querySelectorAll(".sw").forEach(function (x) { x.setAttribute("aria-pressed", String(x === b)); });
+      });
+      paletteEl.appendChild(b);
+    });
+    paletteEl.appendChild(clearBtn);
+  }
+
+  $("#tabTrace").addEventListener("click", function () { mode = "trace"; render(); });
+  $("#tabColor").addEventListener("click", function () { mode = "color"; render(); });
+  /* ---------- つぎへ(じゅんばん / ランダム) ---------- */
+  var ORDER_KEY = "nazori-nurie.order.v1", order = "seq", bag = { trace: [], color: [] };
+  try { if (localStorage.getItem(ORDER_KEY) === "rand") order = "rand"; } catch (err) { /* そのまま */ }
+  function shuffle(a) {
+    for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)), t = a[i]; a[i] = a[j]; a[j] = t; }
+    return a;
+  }
+  function nextKey() {
+    var list = itemsFor(mode).filter(function (i) { return i.kind !== "add"; });
+    var keys = list.map(function (i) { return i.key; }), cur = currentItem().key, k = keys.indexOf(cur);
+    if (keys.length < 2) return cur;
+    if (order === "seq") return keys[(k + 1) % keys.length];
+    /* ランダム: ぜんぶ ひとまわりするまで おなじ えは でない */
+    var b = bag[mode].filter(function (x) { return keys.indexOf(x) >= 0 && x !== cur; });
+    if (!b.length) b = shuffle(keys.filter(function (x) { return x !== cur; }));
+    var nx = b.shift();
+    bag[mode] = b;
+    return nx;
+  }
+  function goNext() { sel[mode] = nextKey(); render(); }
+  function syncOrder() {
+    var rnd = order === "rand", btn = $("#orderBtn");
+    btn.setAttribute("aria-pressed", String(rnd));
+    btn.setAttribute("aria-label", "えらびかた: " + (rnd ? "ランダム" : "じゅんばん") + "(おすと かわります)");
+    $("#orderTxt").textContent = rnd ? "ランダム" : "じゅんばん";
+    $("#orderIcon").innerHTML = rnd
+      ? '<path d="M4 9h5c8 0 8 14 16 14h3M4 23h5c3 0 5-2 7-5M18 12c2-2 4-3 7-3h3M24 5l4 4-4 4M24 19l4 4-4 4"/>'
+      : '<path d="M5 9h22M5 16h22M5 23h22"/>';
+  }
+  $("#orderBtn").addEventListener("click", function () {
+    order = order === "rand" ? "seq" : "rand";
+    bag = { trace: [], color: [] };
+    try { localStorage.setItem(ORDER_KEY, order); } catch (err) { /* ほぞんできなくても OK */ }
+    syncOrder();
+  });
+  $("#skipBtn").addEventListener("click", goNext);
+  $("#nextBtn").addEventListener("click", goNext);
+  $("#againBtn").addEventListener("click", function () { if (traceState) traceState.reset(); });
+
+  tools.querySelectorAll(".tool").forEach(function (b) {
+    b.addEventListener("click", function () {
+      tool = b.getAttribute("data-tool");
+      tools.querySelectorAll(".tool").forEach(function (x) { x.setAttribute("aria-pressed", String(x === b)); });
+    });
+  });
+
+  syncOrder();
+  loadHistory();
+  buildPalette();
+  render();
+  loadCustoms();
+})();
+</script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", function () {
+    navigator.serviceWorker.register("./sw.js").catch(function () {});
+  });
+}
+</script>
+</body>
+</html>
